@@ -70,6 +70,10 @@ const ICONS = {
   tag: 'M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8zM7 7h.01',
   skip: 'M5 4l10 8-10 8zM19 5v14',
   table: 'M3 5h18v14H3zM3 10h18M3 15h18M9 5v14',
+  backspace: 'M21 5H9l-6 7 6 7h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1zM17 9.5l-5 5M12 9.5l5 5',
+  store: 'M3 9l1.5-5h15L21 9M3 9h18M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0M5 12v8h14v-8M10 20v-5h4v5',
+  user: 'M20 21a8 8 0 0 0-16 0M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10z',
+  building: 'M4 21V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v17M15 9h4a1 1 0 0 1 1 1v11M2 21h20M8 7h3M8 11h3M8 15h3',
   keyboard: 'M3 6h18a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zM6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10',
 };
 
@@ -100,8 +104,8 @@ export function iconButton(name, label, onClick, cls = '') {
 const openSheets = [];
 
 // render を渡すとデータが変わるたびに作り直す。content を渡すと作り直さない（入力中のフォーム）
-export function openSheet({ title, render, content, full = false, onClose, headerRight }) {
-  const body = h('div', { class: 'sheet-body' });
+export function openSheet({ title, render, content, full = false, onClose, headerRight, bodyClass = '' }) {
+  const body = h('div', { class: `sheet-body ${bodyClass}` });
   const titleEl = h('h2', { class: 'sheet-title' }, title ?? '');
   const right = h('div', { class: 'sheet-head-right' });
   const sheet = h('div', { class: `sheet ${full ? 'full' : ''}`, role: 'dialog', 'aria-modal': 'true' },

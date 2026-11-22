@@ -3,6 +3,7 @@ import { store } from '../app-store.js';
 import { t } from '../i18n.js';
 import { TYPE_ICON, accIcon } from '../forms.js';
 import { TYPE_ORDER } from '../ledger.js';
+import { catIcon } from '../store.js';
 import { openAccountForm } from '../sheets.js';
 import {
   actionMenu, confirmDialog, downloadFile, empty, h, icon, iconButton, openSheet, promptDialog, seg, setChildren, toast,
@@ -94,23 +95,58 @@ function openCategories() {
       const cats = store.state.categories.filter((c) => c.kind === catKind).sort((a, b) => a.order - b.order);
       return h('div', {},
         seg([['expense', t('kind.expense')], ['income', t('kind.income')]], catKind, (v) => { catKind = v; api.refresh(); }, `wide kind-seg ${catKind}`),
-        cats.map((c) => h('section', { class: 'card list cat-block' },
-          h('div', { class: 'manage-row cat-row' },
-            icon('tag', { size: 18 }),
-            h('span', { class: 'grow strong ellipsis' }, c.name),
-            iconButton('more', t('common.more'), () => actionMenu(c.name, [
-              { label: t('cat.addSub'), icon: 'plus', onClick: async () => { const n = await promptDialog({ title: t('cat.addSub'), label: t('cat.subName') }); if (n) store.addSub(c.id, n); } },
-              { label: t('cat.rename'), icon: 'edit', onClick: async () => { const n = await promptDialog({ title: t('cat.rename'), label: t('cat.name'), value: c.name }); if (n) store.renameCategory(c.id, n); } },
-              { label: t('common.delete'), icon: 'trash', danger: true, onClick: async () => { if (await confirmDialog({ message: t('cat.deleteAsk', { name: c.name }), okLabel: t('common.delete'), danger: true })) store.deleteCategory(c.id); } },
-            ]), 'row-more')),
-          c.subs.map((s) => h('div', { class: 'manage-row sub-row' },
-            h('span', { class: 'grow ellipsis' }, s.name),
-            iconButton('more', t('common.more'), () => actionMenu(s.name, [
-              { label: t('cat.rename'), icon: 'edit', onClick: async () => { const n = await promptDialog({ title: t('cat.rename'), label: t('cat.subName'), value: s.name }); if (n) store.renameSub(c.id, s.id, n); } },
-              { label: t('common.delete'), icon: 'trash', danger: true, onClick: async () => { if (await confirmDialog({ message: t('cat.deleteAsk', { name: s.name }), okLabel: t('common.delete'), danger: true })) store.deleteSub(c.id, s.id); } },
-            ]), 'row-more'))))),
+        cats.map((c) => catBlock(c)),
         h('button', { type: 'button', class: 'btn block', onClick: async () => { const n = await promptDialog({ title: t('cat.add'), label: t('cat.name') }); if (n) store.addCategory(catKind, n); } },
           icon('plus', { size: 18 }), t('cat.add')));
+    },
+  });
+}
+
+const CAT_EMOJIS = ['🍽️', '🍙', '☕', '🍻', '🛒', '🧴', '🚃', '🚗', '🛫', '🏠', '💡', '📱', '🎵', '🎮', '📚', '👕', '💄', '🏥', '💊', '🎁', '🐱', '👶', '💼', '💻', '💰', '📦', '🏷️', '⭐'];
+
+function openIconPicker(c) {
+  const sheet = openSheet({
+    title: t('cat.icon'),
+    content: h('div', { class: 'emoji-grid big' }, CAT_EMOJIS.map((e) => h('button', {
+      type: 'button',
+      class: `emoji ${catIcon(c) === e ? 'on' : ''}`,
+      'aria-label': e,
+      onClick: () => { store.setCategoryIcon(c.id, e); sheet.close(); },
+    }, e))),
+  });
+}
+
+// カテゴリ1つ分（名前・アイコン・サブカテゴリ）
+function catBlock(c) {
+  return h('section', { class: 'card list cat-block' },
+    h('div', { class: 'manage-row cat-row' },
+      h('button', { type: 'button', class: 'cat-emoji-btn', 'aria-label': t('cat.icon'), onClick: () => openIconPicker(c) }, catIcon(c)),
+      h('span', { class: 'grow strong ellipsis' }, c.name),
+      iconButton('more', t('common.more'), () => actionMenu(c.name, [
+        { label: t('cat.addSub'), icon: 'plus', onClick: async () => { const n = await promptDialog({ title: t('cat.addSub'), label: t('cat.subName') }); if (n) store.addSub(c.id, n); } },
+        { label: t('cat.icon'), icon: 'image', onClick: () => openIconPicker(c) },
+        { label: t('cat.rename'), icon: 'edit', onClick: async () => { const n = await promptDialog({ title: t('cat.rename'), label: t('cat.name'), value: c.name }); if (n) store.renameCategory(c.id, n); } },
+        { label: t('common.delete'), icon: 'trash', danger: true, onClick: async () => { if (await confirmDialog({ message: t('cat.deleteAsk', { name: c.name }), okLabel: t('common.delete'), danger: true })) store.deleteCategory(c.id); } },
+      ]), 'row-more')),
+    c.subs.map((s) => h('div', { class: 'manage-row sub-row' },
+      h('span', { class: 'grow ellipsis' }, s.name),
+      iconButton('more', t('common.more'), () => actionMenu(s.name, [
+        { label: t('cat.rename'), icon: 'edit', onClick: async () => { const n = await promptDialog({ title: t('cat.rename'), label: t('cat.subName'), value: s.name }); if (n) store.renameSub(c.id, s.id, n); } },
+        { label: t('common.delete'), icon: 'trash', danger: true, onClick: async () => { if (await confirmDialog({ message: t('cat.deleteAsk', { name: s.name }), okLabel: t('common.delete'), danger: true })) store.deleteSub(c.id, s.id); } },
+      ]), 'row-more'))));
+}
+
+// 1つのカテゴリの内訳（サブカテゴリ）の設定。記録タブの「内訳設定」から開く
+export function openCategoryEditor(catId) {
+  openSheet({
+    title: t('rec.subSettings'),
+    full: true,
+    render: () => {
+      const c = store.get('categories', catId);
+      if (!c) return empty(t('common.uncategorized'), 'tag');
+      return h('div', {}, catBlock(c),
+        h('button', { type: 'button', class: 'btn block add-sub', onClick: async () => { const n = await promptDialog({ title: t('cat.addSub'), label: t('cat.subName') }); if (n) store.addSub(c.id, n); } },
+          icon('plus', { size: 18 }), t('cat.addSub')));
     },
   });
 }

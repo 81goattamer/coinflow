@@ -34,8 +34,8 @@ function txTitle(tx) {
 function txSub(tx) {
   if (tx.type === 'transfer') return `${accName(tx.accountId)} → ${accName(tx.toAccountId)}`;
   if (tx.type === 'cardpay') return `${accName(tx.accountId)} → ${accName(tx.cardId)}`;
-  if (tx.type === 'expense' && !tx.accountId) return t('kind.borrow');
-  return accName(tx.accountId);
+  const acc = tx.type === 'expense' && !tx.accountId ? t('kind.borrow') : accName(tx.accountId);
+  return tx.shop ? `${tx.shop} · ${acc}` : acc;
 }
 
 // accountId を渡すと、その口座から見た増減で金額を出す

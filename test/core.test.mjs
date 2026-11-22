@@ -186,3 +186,14 @@ test('backup round trip', () => {
   assert.throws(() => st2.parseBackup(JSON.stringify({ app: 'X', data: {} })), /invalid/);
   assert.throws(() => st2.parseBackup(JSON.stringify({ app: 'CoinFlow', schemaVersion: 9, data: {} })), /newer/);
 });
+
+test('shop is kept for expense and income only', () => {
+  const { st } = setup();
+  const { cash, save } = bank(st);
+  const a = st.saveTx({ type: 'expense', amount: 500, date: '2026-11-22', accountId: cash.id, shop: ' セブン ' });
+  assert.equal(a.shop, 'セブン');
+  const b = st.saveTx({ type: 'transfer', amount: 500, date: '2026-11-22', accountId: cash.id, toAccountId: save.id, shop: 'x' });
+  assert.equal(b.shop, '');
+  const c = st.saveTx({ type: 'income', amount: 500, date: '2026-11-22', accountId: cash.id, borrowName: '鈴木', shop: '' });
+  assert.equal(c.borrow.name, '鈴木');
+});

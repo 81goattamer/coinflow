@@ -3,8 +3,9 @@ import { store } from './app-store.js';
 import { fmtDate, t, yen } from './i18n.js';
 import { amountInput, closeKeypad } from './keypad.js';
 import {
-  TYPE_ICON, accIcon, accName, accountPicker, catLabel, daySelect, draftFromRsv, draftFromTx, newTxDraft, repeatLabel, rsvForm, shiftSeg, txForm,
+  TYPE_ICON, accIcon, accName, accountPicker, catLabel, daySelect, draftFromRsv, draftFromTx, newTxDraft, repeatLabel, rsvForm, shiftSeg,
 } from './forms.js';
+import { openCategoryChooser, txDetail } from './tx-detail.js';
 import { balances, bellItems, cardStatus, historyRows, openParties, rowTouches, unpaidCycles, unpaidOf } from './ledger.js';
 import { rowView, statusLines } from './rows.js';
 import {
@@ -209,11 +210,29 @@ export function openTxEdit(id) {
   const tx = store.get('txs', id);
   if (!tx) return;
   const st = draftFromTx(tx);
-  const sheet = openSheet({
+  openDetailSheet(st, {
     title: t('hist.editTx'),
-    full: true,
-    content: txForm(st, { editing: true, typeLocked: true, onDone: () => { closeKeypad(); sheet.close(); toast(t('rec.updated')); } }),
+    editing: true,
+    onDone: () => toast(t('rec.updated')),
   });
+}
+
+// 記録の詳細画面をシートで開く（編集・予約の登録）
+function openDetailSheet(st, { title, editing = false, onDone }) {
+  let sheet;
+  const mount = () => {
+    const el = txDetail(st, {
+      title,
+      editing,
+      onBack: () => sheet.close(),
+      onCategory: () => openCategoryChooser(st, mount),
+      onDone: (tx) => { sheet.close(); onDone?.(tx); },
+    });
+    sheet.body.replaceChildren(el);
+  };
+  sheet = openSheet({ title: '', full: true, bodyClass: 'detail-body' });
+  sheet.body.closest('.sheet').classList.add('detail-sheet');
+  mount();
 }
 
 // ---- 予約の登録（HIST-22） ----
@@ -223,16 +242,14 @@ export function openRegisterSheet(rsvId) {
   if (!r) return;
   const st = newTxDraft(r.type === 'salary' ? 'income' : r.type);
   Object.assign(st, { amount: r.amount, accountId: r.accountId, catId: r.catId, subId: r.subId, date: r.date, withTime: false, time: null, reservationId: r.id });
-  if (r.type === 'salary') st.catId = store.salaryCategory().id;
-  const sheet = openSheet({
-    title: r.type === 'salary' ? `${t('kind.salary')} · ${r.company}` : t(`kind.${r.type}`),
-    full: true,
-    content: txForm(st, { typeLocked: true, onDone: () => {
-      closeKeypad();
+  // 給与は、お店の欄に会社名を入れる
+  if (r.type === 'salary') Object.assign(st, { catId: store.salaryCategory().id, subId: null, shop: r.company });
+  openDetailSheet(st, {
+    title: r.type === 'salary' ? `${t('kind.salary')} · ${r.company}` : t(`rec.detail.${st.type}`),
+    onDone: () => {
       store.advanceReservation(r.id);
-      sheet.close();
       toast(t('rec.saved'));
-    } }),
+    },
   });
 }
 

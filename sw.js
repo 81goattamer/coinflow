@@ -25,6 +25,7 @@ const FILES = [
   './js/rows.js',
   './js/sheets.js',
   './js/store.js',
+  './js/tx-detail.js',
   './js/ui.js',
   './js/views/analysis.js',
   './js/views/history.js',

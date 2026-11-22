@@ -19,32 +19,38 @@ export function defaultSettings() {
 // 初期のカテゴリ（SET-05）。名前は日本語と英語を持ち、作るときの言語で決める
 const DEFAULT_CATS = {
   expense: [
-    ['食費|Food', ['食料品|Groceries', '外食|Dining out', 'カフェ|Cafe']],
-    ['日用品|Daily goods', []],
-    ['交通|Transport', ['電車|Train', 'バス|Bus', 'タクシー|Taxi']],
-    ['住まい|Housing', ['家賃|Rent', '光熱費|Utilities', '通信|Phone & internet']],
-    ['趣味・娯楽|Hobbies', []],
-    ['交際費|Social', []],
-    ['衣服・美容|Clothing & beauty', []],
-    ['医療|Medical', []],
-    ['教育|Education', []],
-    ['その他|Other', []],
+    ['食費|Food', ['食料品|Groceries', '外食|Dining out', 'カフェ|Cafe'], '🍽️'],
+    ['日用品|Daily goods', [], '🧴'],
+    ['交通|Transport', ['電車|Train', 'バス|Bus', 'タクシー|Taxi'], '🚃'],
+    ['住まい|Housing', ['家賃|Rent', '光熱費|Utilities', '通信|Phone & internet'], '🏠'],
+    ['趣味・娯楽|Hobbies', [], '🎵'],
+    ['交際費|Social', [], '🍻'],
+    ['衣服・美容|Clothing & beauty', [], '👕'],
+    ['医療|Medical', [], '🏥'],
+    ['教育|Education', [], '📚'],
+    ['その他|Other', [], '📦'],
   ],
   income: [
-    ['給与|Salary', []],
-    ['副業|Side job', []],
-    ['臨時収入|Extra income', []],
-    ['その他|Other', []],
+    ['給与|Salary', [], '💼'],
+    ['副業|Side job', [], '💻'],
+    ['臨時収入|Extra income', [], '🎁'],
+    ['その他|Other', [], '📦'],
   ],
 };
+// 初めからあるカテゴリのアイコン（名前から引く。アイコンを持たない古いデータにも使う）
+const DEFAULT_ICONS = Object.fromEntries(Object.values(DEFAULT_CATS).flat().flatMap(([name, , ic]) => name.split('|').map((n) => [n, ic])));
+export const CAT_ICON_DEFAULT = '🏷️';
+export function catIcon(cat) {
+  return cat?.icon || DEFAULT_ICONS[cat?.name] || CAT_ICON_DEFAULT;
+}
 export const SALARY_NAMES = ['給与', 'Salary'];
 
 export function defaultCategories(lang = 'ja') {
   const pick = (s) => s.split('|')[lang === 'en' ? 1 : 0];
   const out = [];
   for (const kind of ['expense', 'income']) {
-    DEFAULT_CATS[kind].forEach(([name, subs], i) => {
-      out.push({ id: uid(), kind, name: pick(name), subs: subs.map((s) => ({ id: uid(), name: pick(s) })), order: i });
+    DEFAULT_CATS[kind].forEach(([name, subs, ic], i) => {
+      out.push({ id: uid(), kind, name: pick(name), icon: ic, subs: subs.map((s) => ({ id: uid(), name: pick(s) })), order: i });
     });
   }
   return out;
@@ -208,6 +214,7 @@ export class Store {
       cycle: strOrNull(input.cycle ?? old?.cycle),
       catId: type === 'expense' || type === 'income' ? strOrNull(input.catId) : null,
       subId: type === 'expense' || type === 'income' ? strOrNull(input.subId) : null,
+      shop: type === 'expense' || type === 'income' ? str(input.shop).trim() : '',
       borrow: null,
       lends: [],
       cancel: old?.cancel ?? null,
@@ -341,15 +348,26 @@ export class Store {
 
   // ---- カテゴリ（SET-01） ----
 
+  isSalaryCategory(id) {
+    const c = this.get('categories', id);
+    return !!c && c.kind === 'income' && SALARY_NAMES.includes(c.name);
+  }
+
   salaryCategory() {
     const found = this.state.categories.find((c) => c.kind === 'income' && SALARY_NAMES.includes(c.name));
     if (found) return found;
-    return this.put('categories', { id: uid(), kind: 'income', name: SALARY_NAMES[0], subs: [], order: -1 });
+    return this.put('categories', { id: uid(), kind: 'income', name: SALARY_NAMES[0], icon: '💼', subs: [], order: -1 });
   }
 
   addCategory(kind, name) {
     const order = Math.max(-1, ...this.state.categories.filter((c) => c.kind === kind).map((c) => c.order)) + 1;
-    return this.done(this.put('categories', { id: uid(), kind, name: str(name).trim(), subs: [], order }));
+    return this.done(this.put('categories', { id: uid(), kind, name: str(name).trim(), icon: CAT_ICON_DEFAULT, subs: [], order }));
+  }
+
+  setCategoryIcon(id, value) {
+    const c = this.get('categories', id);
+    if (c) this.put('categories', { ...c, icon: value });
+    this.done();
   }
 
   renameCategory(id, name) {

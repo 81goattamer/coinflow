@@ -6,7 +6,7 @@ import { amountInput } from './keypad.js';
 import { activeAccounts } from './ledger.js';
 import { field, h, icon, seg, setChildren, switchInput, toast } from './ui.js';
 
-const BORROW = '__borrow';
+export const BORROW = '__borrow';
 
 // ---- 表示の部品 ----
 
@@ -98,7 +98,7 @@ function categoryOk(catId, subId) {
   return !c.subs.length || c.subs.some((s) => s.id === subId);
 }
 
-function dateTimeFields(st, onChange) {
+export function dateTimeFields(st, onChange) {
   const date = h('input', { class: 'input', type: 'date', value: st.date, required: true, 'aria-label': t('common.date'), onChange: (e) => { if (e.target.value) st.date = e.target.value; else e.target.value = st.date; onChange(); } });
   const time = h('input', { class: 'input time', type: 'time', value: st.time ?? '', disabled: !st.withTime, 'aria-label': t('common.time'), onChange: (e) => { st.time = e.target.value || null; } });
   return h('div', { class: 'datetime' },
@@ -119,7 +119,7 @@ function dateTimeFields(st, onChange) {
 // ---- 記録のフォーム ----
 
 export function newTxDraft(type = 'expense') {
-  return { type, amount: null, accountId: null, toAccountId: null, borrowName: '', borrowOn: false, catId: null, subId: null, date: store.today(), withTime: true, time: nowTime(), lends: [], id: null, reservationId: null };
+  return { type, amount: null, accountId: null, toAccountId: null, borrowName: '', borrowOn: false, shop: '', catId: null, subId: null, date: store.today(), withTime: true, time: nowTime(), lends: [], id: null, reservationId: null };
 }
 
 export function draftFromTx(tx) {
@@ -129,8 +129,10 @@ export function draftFromTx(tx) {
     amount: tx.amount,
     accountId: tx.type === 'expense' && !tx.accountId ? BORROW : tx.accountId,
     toAccountId: tx.toAccountId,
-    borrowName: tx.borrow?.name ?? '',
+    borrowName: tx.type === 'expense' ? (tx.borrow?.name ?? '') : '',
     borrowOn: tx.type === 'income' && !!tx.borrow,
+    // 収入の借入では、お店の欄に借りた人を入れる
+    shop: tx.type === 'income' && tx.borrow ? tx.borrow.name : (tx.shop ?? ''),
     catId: tx.catId,
     subId: tx.subId,
     date: tx.date,
@@ -141,120 +143,6 @@ export function draftFromTx(tx) {
     cardId: tx.cardId,
     cycle: tx.cycle,
   };
-}
-
-// st は下書き（newTxDraft / draftFromTx）。onDone(tx) は保存したとき
-export function txForm(st, { onDone, editing = false, typeLocked = false }) {
-  const root = h('div', { class: 'form tx-form' });
-  let saveBtn;
-  const valid = () => {
-    if (!(st.amount > 0)) return false;
-    if (st.type === 'cardpay') return true;
-    if (st.type === 'transfer') return !!st.accountId && !!st.toAccountId && st.accountId !== st.toAccountId;
-    if (!st.accountId) return false;
-    if (st.accountId === BORROW && !st.borrowName.trim()) return false;
-    if (st.type === 'income' && st.borrowOn && !st.borrowName.trim()) return false;
-    return categoryOk(st.catId, st.subId);
-  };
-  const check = () => { if (saveBtn) saveBtn.disabled = !valid(); };
-
-  const save = () => {
-    if (!valid()) return;
-    if (st.type === 'expense') {
-      const lendSum = st.lends.reduce((s, l) => s + (l.name.trim() && l.amount > 0 ? l.amount : 0), 0);
-      if (lendSum > st.amount) {
-        toast(t('lend.over'));
-        return;
-      }
-    }
-    const borrowName = st.accountId === BORROW || (st.type === 'income' && st.borrowOn) ? st.borrowName : '';
-    const tx = store.saveTx({
-      id: st.id,
-      type: st.type,
-      amount: st.amount,
-      date: st.date,
-      time: st.withTime ? st.time : null,
-      accountId: st.accountId === BORROW ? null : st.accountId,
-      toAccountId: st.toAccountId,
-      catId: st.catId,
-      subId: st.subId,
-      borrowName,
-      lends: st.lends,
-      reservationId: st.reservationId,
-      cardId: st.cardId,
-      cycle: st.cycle,
-    });
-    onDone?.(tx);
-  };
-
-  const draw = () => {
-    const parts = [];
-    if (!typeLocked) {
-      parts.push(seg([['expense', t('kind.expense')], ['income', t('kind.income')], ['transfer', t('kind.transfer')]], st.type, (v) => {
-        if (v === st.type) return;
-        st.type = v;
-        st.catId = null;
-        st.subId = null;
-        if (v !== 'expense' && st.accountId === BORROW) st.accountId = null;
-        const acc = store.get('accounts', st.accountId);
-        if (v !== 'expense' && acc?.type === 'card') st.accountId = null;
-        draw();
-      }, `wide kind-seg ${st.type}`));
-    }
-    parts.push(h('div', { class: `amount-row ${st.type}` },
-      h('span', { class: 'amount-kind' }, icon(KIND_ICON[st.type], { size: 22 })),
-      amountInput({ value: st.amount, big: true, autoOpen: !editing && st.amount == null, onChange: (v) => { st.amount = v; check(); } })));
-
-    if (st.type === 'cardpay') {
-      parts.push(field(t('common.date'), dateTimeFields(st, check)));
-    } else if (st.type === 'transfer') {
-      parts.push(field(t('field.from'), accountPicker({ types: ['cash', 'saving'], value: st.accountId, onChange: (id) => { st.accountId = id; if (st.toAccountId === id) st.toAccountId = null; draw(); } })));
-      parts.push(field(t('field.to'), accountPicker({ types: ['cash', 'saving'], value: st.toAccountId, exclude: st.accountId, onChange: (id) => { st.toAccountId = id; draw(); } })));
-      parts.push(field(t('common.date'), dateTimeFields(st, check)));
-    } else {
-      const isExp = st.type === 'expense';
-      parts.push(field(isExp ? t('field.payFrom') : t('field.payTo'), accountPicker({
-        types: isExp ? ['cash', 'card', 'saving'] : ['cash', 'saving'],
-        value: st.accountId,
-        extra: isExp ? [{ id: BORROW, label: t('kind.borrow'), icon: 'handin' }] : [],
-        onChange: (id) => { st.accountId = id; draw(); },
-      })));
-      if (isExp && st.accountId === BORROW) parts.push(borrowNameInput(st, check));
-      if (!isExp) {
-        parts.push(h('label', { class: 'toggle-row' }, icon('handin', { size: 20 }), h('span', { class: 'grow' }, t('field.borrowSwitch')),
-          switchInput(st.borrowOn, (v) => { st.borrowOn = v; draw(); }, t('field.borrowSwitch'))));
-        if (st.borrowOn) parts.push(borrowNameInput(st, check));
-      }
-      parts.push(field(t('field.category'), categoryPicker({ kind: st.type, catId: st.catId, subId: st.subId, onChange: (c, s) => { st.catId = c; st.subId = s; check(); } })));
-      parts.push(field(t('common.date'), dateTimeFields(st, check)));
-      if (isExp) parts.push(lendSection(st, draw));
-    }
-    saveBtn = h('button', { type: 'button', class: `btn primary block save-btn ${st.type}`, onClick: save }, editing ? t('common.save') : t('common.register'));
-    parts.push(saveBtn);
-    setChildren(root, parts);
-    check();
-  };
-  draw();
-  return root;
-}
-
-function borrowNameInput(st, check) {
-  return field(t('field.borrowFrom'), h('input', {
-    class: 'input', value: st.borrowName, maxlength: 30, placeholder: t('common.name'), 'aria-label': t('field.borrowFrom'),
-    onInput: (e) => { st.borrowName = e.target.value; check(); },
-  }));
-}
-
-// 貸与（LEND-03）。押した数だけ名前と金額の欄を出す
-function lendSection(st, redraw) {
-  return h('div', { class: 'lends' },
-    st.lends.map((l) => h('div', { class: `lend-row ${l.done ? 'done' : ''}` },
-      icon('handout', { size: 20 }),
-      h('input', { class: 'input', value: l.name, maxlength: 30, placeholder: t('field.lendName'), 'aria-label': t('field.lendName'), onInput: (e) => { l.name = e.target.value; } }),
-      amountInput({ value: l.amount, onChange: (v) => { l.amount = v; } }),
-      h('button', { type: 'button', class: 'icon-btn danger', 'aria-label': t('common.delete'), onClick: () => { st.lends = st.lends.filter((x) => x !== l); redraw(); } }, icon('close', { size: 18 })))),
-    h('button', { type: 'button', class: 'text-btn left', onClick: () => { st.lends.push({ id: undefined, name: '', amount: null }); redraw(); } },
-      h('span', { class: 'inline-icon' }, icon('plus', { size: 18 })), t('field.lendAdd')));
 }
 
 // ---- 予約のフォーム ----
