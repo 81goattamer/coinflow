@@ -57,6 +57,11 @@ function startTransfer() {
   S.record.step = 'from';
 }
 
+// 種類のボタンの下に出す見出し
+function sectionHead(text) {
+  return h('h2', { class: 'cat-section-head static' }, text);
+}
+
 function cats(kind) {
   return store.state.categories.filter((c) => c.kind === kind).sort((a, b) => a.order - b.order);
 }
@@ -81,17 +86,20 @@ function recent() {
 
 export function renderRecord(root) {
   const s = S[mode];
-  if (mode === 'record') {
-    if (s.step === 'detail' && txDraft) return renderDetail(root);
-    if ((s.step === 'from' || s.step === 'to') && txDraft) return renderTransferPick(root);
-  } else if (s.step === 'detail' && rsvDraft) {
-    return renderRsvDetail(root);
-  }
+  if (mode === 'record' && s.step === 'detail' && txDraft) return renderDetail(root);
+  if (mode === 'reserve' && s.step === 'detail' && rsvDraft && s.kind !== 'salary') return renderRsvDetail(root);
   if (s.step === 'subs') {
     const c = store.get('categories', s.catId);
     if (c) return renderSubs(root, c);
   }
-  s.step = 'list';
+  if (s.kind === 'transfer') {
+    if (!txDraft || txDraft.type !== 'transfer') startTransfer();
+    if (s.step !== 'to') s.step = 'from';
+  } else if (s.kind === 'salary') {
+    if (!rsvDraft || rsvDraft.type !== 'salary') rsvDraft = newRsvDraft('salary');
+  } else {
+    s.step = 'list';
+  }
   const top = h('header', { class: 'page-head' },
     seg([['record', t('rec.record')], ['reserve', t('rec.reserve')]], mode, (v) => {
       mode = v;
@@ -103,15 +111,31 @@ export function renderRecord(root) {
     class: `kind-pill ${k} ${k === s.kind ? 'on' : ''}`,
     'aria-pressed': k === s.kind ? 'true' : 'false',
     onClick: () => {
-      // 振替と給与（予約）はカテゴリがないので、すぐ次へ
+      if (k === s.kind) return;
+      closeKeypad();
+      s.kind = k;
+      // 振替と給与（予約）はカテゴリがないので、種類のボタンの下に口座の選択・入力欄を出す
       if (k === 'transfer') startTransfer();
-      else {
-        s.kind = k;
-        if (k === 'salary') startRsv(null, null);
-      }
       renderRecord(root);
     },
   }, t(`kind.${k}`))));
+  if (s.kind === 'transfer') {
+    setChildren(root, top, kindSeg, transferPick(root), h('div', { class: 'bottom-space' }));
+    return;
+  }
+  if (s.kind === 'salary') {
+    setChildren(root, top, kindSeg, sectionHead(t('rec.rsv.salary')),
+      h('div', { class: 'card pad-card' }, rsvForm(rsvDraft, {
+        onCategory: () => {},
+        onDone: () => {
+          closeKeypad();
+          rsvDraft = newRsvDraft('salary');
+          toast(t('rec.reserved'));
+        },
+      })),
+      h('div', { class: 'bottom-space' }));
+    return;
+  }
   const pick = (c, subId) => (mode === 'record' ? startDetail(c, subId) : startRsv(c, subId));
   const rows = recent();
   const catRow = (c, subId = undefined) => h('button', {
@@ -170,24 +194,17 @@ function renderSubs(root, c) {
     h('div', { class: 'bottom-space' }));
 }
 
-// 振替の口座選択（出金元 → 入金先）
-function renderTransferPick(root) {
+// 振替の口座選択（出金元 → 入金先）。種類のボタンの下に出す
+function transferPick(root) {
   const s = S.record;
   const isFrom = s.step === 'from';
   const k = keep.transfer;
-  const back = () => {
-    if (isFrom) {
-      txDraft = null;
-      s.step = 'list';
-    } else {
-      s.step = 'from';
-    }
-    renderRecord(root);
-  };
   const from = store.get('accounts', txDraft.accountId);
-  setChildren(root,
-    subHead(t(isFrom ? 'rec.chooseFrom' : 'rec.chooseTo'), back),
-    !isFrom && from ? h('div', { class: 'tr-from' }, accIcon(from, 28), h('span', { class: 'grow ellipsis' }, from.name), icon('transfer', { size: 20 })) : null,
+  return h('section', { class: 'cat-section' },
+    sectionHead(t(isFrom ? 'rec.chooseFrom' : 'rec.chooseTo')),
+    // 選んだ出金元。押すと選び直せる
+    !isFrom && from ? h('button', { type: 'button', class: 'tr-from', onClick: () => { s.step = 'from'; renderRecord(root); } },
+      accIcon(from, 28), h('span', { class: 'grow ellipsis' }, from.name), h('span', { class: 'muted small' }, t('rec.changeFrom')), icon('transfer', { size: 20 })) : null,
     accountList({
       types: TR_TYPES,
       value: isFrom ? (txDraft.accountId ?? k?.accountId) : (txDraft.toAccountId ?? (k?.accountId === txDraft.accountId ? k?.toAccountId : null)),
@@ -203,8 +220,7 @@ function renderTransferPick(root) {
         }
         renderRecord(root);
       },
-    }),
-    h('div', { class: 'bottom-space' }));
+    }));
 }
 
 function renderDetail(root) {
@@ -243,19 +259,13 @@ function renderDetail(root) {
   setChildren(root, page);
 }
 
-// 予約の入力（カテゴリは一覧で選んだもの）
+// 予約の入力（カテゴリは一覧で選んだもの）。給与は種類のボタンの下に出すのでここは通らない
 function renderRsvDetail(root) {
   const s = S.reserve;
-  const isSalary = rsvDraft.type === 'salary';
   const back = () => {
     closeKeypad();
-    if (isSalary) {
-      s.kind = 'expense';
-      s.step = 'list';
-    } else {
-      s.step = store.get('categories', rsvDraft.catId)?.subs.length ? 'subs' : 'list';
-      s.catId = rsvDraft.catId;
-    }
+    s.step = store.get('categories', rsvDraft.catId)?.subs.length ? 'subs' : 'list';
+    s.catId = rsvDraft.catId;
     rsvDraft = null;
     renderRecord(root);
   };
@@ -271,7 +281,6 @@ function renderRsvDetail(root) {
       },
       onDone: () => {
         closeKeypad();
-        if (isSalary) s.kind = 'expense';
         rsvDraft = null;
         s.step = 'list';
         toast(t('rec.reserved'));

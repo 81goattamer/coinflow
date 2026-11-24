@@ -223,7 +223,7 @@ select.input { appearance: auto; }
 .kind-pill.on.salary { background: var(--income); color: #fff; }
 .cat-line.boxed { min-height: 52px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
 .cat-line.boxed .cat-name { font-size: 16px; }
-.tr-from { display: flex; align-items: center; gap: 10px; margin: 6px 0 12px; padding: 10px 12px; border-radius: 12px; background: var(--fill); }
+.tr-from { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; font-size: 17px; margin: 10px 0 12px; padding: 10px 12px; border-radius: 12px; background: var(--fill); }
 .tr-from > .icon { color: var(--muted); }
 .cat-section { margin-bottom: 8px; }
 .cat-section-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 12px 2px; margin: 0; font-size: 18px; font-weight: 800; border-bottom: 1px solid var(--line); text-align: left; }
