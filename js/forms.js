@@ -4,6 +4,7 @@ import { nowTime, weekday } from './dates.js';
 import { fmtDay, t, weekName, yen } from './i18n.js';
 import { amountInput } from './keypad.js';
 import { activeAccounts } from './ledger.js';
+import { catIcon } from './store.js';
 import { field, h, icon, seg, setChildren, switchInput, toast } from './ui.js';
 
 export const BORROW = '__borrow';
@@ -164,7 +165,8 @@ export function repeatLabel(r) {
   return '';
 }
 
-export function rsvForm(st, { onDone, editing = false }) {
+// onCategory を渡すと（記録タブの予約）、種類の切り替えを出さず、カテゴリは一覧で選んだものを表示する
+export function rsvForm(st, { onDone, editing = false, onCategory = null }) {
   const root = h('div', { class: 'form rsv-form' });
   let saveBtn;
   const valid = () => {
@@ -185,7 +187,7 @@ export function rsvForm(st, { onDone, editing = false }) {
   };
   const draw = () => {
     const parts = [];
-    parts.push(seg([['expense', t('kind.expense')], ['income', t('kind.income')], ['salary', t('kind.salary')]], st.type, (v) => {
+    if (!onCategory) parts.push(seg([['expense', t('kind.expense')], ['income', t('kind.income')], ['salary', t('kind.salary')]], st.type, (v) => {
       if (v === st.type) return;
       st.type = v;
       st.catId = null;
@@ -206,7 +208,12 @@ export function rsvForm(st, { onDone, editing = false }) {
         amountInput({ value: st.amount, big: true, label: t('field.amountOptional'), placeholder: t('field.amountOptional'), onChange: (v) => { st.amount = v; } })));
       parts.push(field(t('common.date'), h('input', { class: 'input', type: 'date', value: st.date, 'aria-label': t('common.date'), onChange: (e) => { if (e.target.value) st.date = e.target.value; else e.target.value = st.date; draw(); } })));
       parts.push(field(isExp ? t('field.payFrom') : t('field.payTo'), accountPicker({ types: isExp ? ['cash', 'card', 'saving'] : ['cash', 'saving'], value: st.accountId, onChange: (id) => { st.accountId = id; draw(); } })));
-      parts.push(field(t('field.category'), categoryPicker({ kind: st.type, catId: st.catId, subId: st.subId, onChange: (c, s) => { st.catId = c; st.subId = s; check(); } })));
+      parts.push(field(t('field.category'), onCategory
+        ? h('button', { type: 'button', class: 'cat-line boxed', onClick: onCategory },
+          h('span', { class: 'cat-emoji' }, catIcon(store.get('categories', st.catId))),
+          h('span', { class: 'grow cat-text' }, h('span', { class: 'cat-name ellipsis' }, catLabel(st.catId, st.subId))),
+          icon('chevron', { size: 20 }))
+        : categoryPicker({ kind: st.type, catId: st.catId, subId: st.subId, onChange: (c, s) => { st.catId = c; st.subId = s; check(); } })));
       parts.push(field(t('field.repeat'), repeatControl(st, draw)));
     }
     saveBtn = h('button', { type: 'button', class: 'btn primary block', onClick: save }, editing ? t('common.save') : t('rec.reserve'));

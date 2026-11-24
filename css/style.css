@@ -220,6 +220,11 @@ select.input { appearance: auto; }
 .kind-pill.on.expense { background: var(--expense); color: #fff; }
 .kind-pill.on.income { background: var(--income); color: #fff; }
 .kind-pill.on.transfer { background: var(--accent); color: var(--accent-text); }
+.kind-pill.on.salary { background: var(--income); color: #fff; }
+.cat-line.boxed { min-height: 52px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.cat-line.boxed .cat-name { font-size: 16px; }
+.tr-from { display: flex; align-items: center; gap: 10px; margin: 6px 0 12px; padding: 10px 12px; border-radius: 12px; background: var(--fill); }
+.tr-from > .icon { color: var(--muted); }
 .cat-section { margin-bottom: 8px; }
 .cat-section-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 12px 2px; margin: 0; font-size: 18px; font-weight: 800; border-bottom: 1px solid var(--line); text-align: left; }
 .cat-section-head.static { cursor: default; }
@@ -271,7 +276,10 @@ select.input { appearance: auto; }
 .detail-sheet .sheet-body.detail-body { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
 .detail-sheet .tx-detail { flex: 1; min-height: 0; }
 .pick-row.on { color: var(--accent); font-weight: 700; }
-.pick-list .pick-row { padding: 10px 12px; }
+.pick-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; text-align: left; font-size: 17px; border-bottom: .5px solid var(--line); }
+.pick-row:last-child { border-bottom: 0; }
+.pick-row > .icon { color: var(--accent); }
+.pick-list .pick-row { padding: 10px 14px; }
 .cat-row-btn { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 8px 12px; border-bottom: .5px solid var(--line); text-align: left; }
 .cat-row-btn:last-child { border-bottom: 0; }
 .cat-row-btn > .icon { color: var(--muted); }

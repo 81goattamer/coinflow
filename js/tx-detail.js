@@ -8,28 +8,30 @@ import { BORROW, accIcon, accName, catLabel, dateTimeFields, KIND_ICON } from '.
 import { activeAccounts, balances, unpaidOf } from './ledger.js';
 import { h, icon, openSheet, setChildren, switchInput, toast } from './ui.js';
 
-// 口座を選ぶシート
-export function openAccountPicker({ types, value, extra = [], exclude = null, title, onPick }) {
+// 口座の一覧（残高つき）。シートと、振替の口座選択画面で使う
+export function accountList({ types, value, extra = [], exclude = null, onPick }) {
   const bal = balances(store.state);
   const list = activeAccounts(store.state, types).filter((a) => a.id !== exclude);
-  const sheet = openSheet({
-    title,
-    content: h('div', { class: 'card list pick-list' },
-      list.map((a) => h('button', {
-        type: 'button',
-        class: `pick-row ${a.id === value ? 'on' : ''}`,
-        onClick: () => { sheet.close(); onPick(a.id); },
-      }, accIcon(a, 32), h('span', { class: 'grow ellipsis' }, a.name),
-      h('span', { class: 'muted small' }, yen(a.type === 'card' ? unpaidOf(bal, a.id) : bal.get(a.id))),
-      a.id === value ? icon('check', { size: 18 }) : null)),
-      extra.map((x) => h('button', {
-        type: 'button',
-        class: `pick-row ${x.id === value ? 'on' : ''}`,
-        onClick: () => { sheet.close(); onPick(x.id); },
-      }, h('span', { class: 'acc-icon', style: { width: '32px', height: '32px' } }, icon(x.icon, { size: 18 })), h('span', { class: 'grow' }, x.label),
-      x.id === value ? icon('check', { size: 18 }) : null)),
-      !list.length && !extra.length ? h('p', { class: 'muted small pad' }, t('rec.noAccount')) : null),
-  });
+  return h('div', { class: 'card list pick-list' },
+    list.map((a) => h('button', {
+      type: 'button',
+      class: `pick-row ${a.id === value ? 'on' : ''}`,
+      onClick: () => onPick(a.id),
+    }, accIcon(a, 32), h('span', { class: 'grow ellipsis' }, a.name),
+    h('span', { class: 'muted small' }, yen(a.type === 'card' ? unpaidOf(bal, a.id) : bal.get(a.id))),
+    a.id === value ? icon('check', { size: 18 }) : null)),
+    extra.map((x) => h('button', {
+      type: 'button',
+      class: `pick-row ${x.id === value ? 'on' : ''}`,
+      onClick: () => onPick(x.id),
+    }, h('span', { class: 'acc-icon', style: { width: '32px', height: '32px' } }, icon(x.icon, { size: 18 })), h('span', { class: 'grow' }, x.label),
+    x.id === value ? icon('check', { size: 18 }) : null)),
+    !list.length && !extra.length ? h('p', { class: 'muted small pad' }, t('rec.noAccount')) : null);
+}
+
+// 口座を選ぶシート
+export function openAccountPicker({ title, onPick, ...rest }) {
+  const sheet = openSheet({ title, content: accountList({ ...rest, onPick: (id) => { sheet.close(); onPick(id); } }) });
   return sheet;
 }
 
