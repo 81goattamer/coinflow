@@ -215,6 +215,8 @@ export class Store {
       catId: type === 'expense' || type === 'income' ? strOrNull(input.catId) : null,
       subId: type === 'expense' || type === 'income' ? strOrNull(input.subId) : null,
       shop: type === 'expense' || type === 'income' ? str(input.shop).trim() : '',
+      // ポイント利用（支出だけ）。金額を超えない
+      points: type === 'expense' ? Math.min(pos(input.points ?? 0) || 0, pos(input.amount)) : 0,
       borrow: null,
       lends: [],
       cancel: old?.cancel ?? null,
@@ -293,10 +295,10 @@ export class Store {
 
   // ---- カードの支払い（CARD-03） ----
 
-  payCard(cardId, cycle, amount, date) {
+  payCard(cardId, cycle, amount, date, accountId = null) {
     const card = this.get('accounts', cardId);
     if (!card) return null;
-    return this.saveTx({ type: 'cardpay', amount, date, time: null, accountId: card.card.debitId, cardId, cycle });
+    return this.saveTx({ type: 'cardpay', amount, date, time: null, accountId: accountId ?? card.card.debitId, cardId, cycle });
   }
 
   // ---- 予約（RSV） ----

@@ -76,6 +76,9 @@ export function openAccountForm(account = null) {
     const parts = [];
     if (!editing) {
       parts.push(seg(['cash', 'card', 'saving'].map((k) => [k, t(`type.${k}`)]), st.type, (v) => { st.type = v; draw(); }, 'wide'));
+    } else if (st.type !== 'card') {
+      // 登録したあとも、資金と貯金は切り替えられる（カードとは切り替えない）
+      parts.push(field(t('acc.typeChange'), seg(['cash', 'saving'].map((k) => [k, t(`type.${k}`)]), st.type, (v) => { st.type = v; draw(); }, 'wide')));
     }
     parts.push(field(t('acc.icon'),
       h('div', { class: 'icon-pick' },
@@ -113,7 +116,7 @@ export function openAccountForm(account = null) {
     if (!valid()) return;
     const card = st.type === 'card' ? { closingDay: st.card.closingDay, payDay: st.card.payDay, payMonths: st.card.payMonths, debitId: st.card.debitId, shift: st.card.shift } : null;
     if (editing) {
-      store.updateAccount(account.id, { name: st.name, memo: st.memo, icon: st.icon ?? defIcon(), ...(card ? { card } : {}) });
+      store.updateAccount(account.id, { name: st.name, memo: st.memo, icon: st.icon ?? defIcon(), ...(card ? { card } : { type: st.type }) });
       if (st.amount != null && st.amount !== current) {
         const diff = st.type === 'card' ? current - st.amount : st.amount - current;
         store.adjustBalance(account.id, diff, st.showAdj);
@@ -186,7 +189,7 @@ export function openRowMenu(row) {
     return;
   }
   if (row.kind !== 'tx') {
-    openParties(row.tx).length && row.kind !== 'refund' ? openPartySheet(row.tx.id) : openTxMenu(row.tx);
+    openParties(row.tx).length && row.kind !== 'refund' && row.kind !== 'points' ? openPartySheet(row.tx.id) : openTxMenu(row.tx);
     return;
   }
   openTxMenu(row.tx);
@@ -246,10 +249,23 @@ export function openRegisterSheet(rsvId) {
   if (r.type === 'salary') Object.assign(st, { catId: store.salaryCategory().id, subId: null, shop: r.company });
   openDetailSheet(st, {
     title: r.type === 'salary' ? `${t('kind.salary')} · ${r.company}` : t(`rec.detail.${st.type}`),
-    onDone: () => {
+    onDone: async (tx) => {
+      // 給与を予約と違う口座で受け取ったら、次回からその口座にするか聞く
+      if (r.type === 'salary' && tx?.accountId && tx.accountId !== r.accountId && await askKeep('setting.salaryAcc', tx.accountId)) {
+        store.saveReservation({ ...r, accountId: tx.accountId });
+      }
       store.advanceReservation(r.id);
       toast(t('rec.saved'));
     },
+  });
+}
+
+// 「次回からの○○を△△に変更しますか？」。変更を維持するなら true
+export function askKeep(whatKey, accountId) {
+  return confirmDialog({
+    message: t('setting.keepAsk', { what: t(whatKey), name: accName(accountId) }),
+    okLabel: t('setting.keep'),
+    cancelLabel: t('setting.once'),
   });
 }
 
@@ -283,15 +299,25 @@ export function openPaySheet(cardId, { onDone } = {}) {
     return null;
   }
   let amount = s.amount;
+  let from = store.get('accounts', a.card.debitId)?.deleted ? null : a.card.debitId;
   let done = false;
-  const btn = h('button', { type: 'button', class: 'btn primary', disabled: !(amount > 0), onClick: () => {
-    if (!(amount > 0)) return;
+  const ok = () => amount > 0 && !!from;
+  const btn = h('button', { type: 'button', class: 'btn primary', disabled: !ok(), onClick: async () => {
+    if (!ok() || done) return;
     done = true;
     closeKeypad();
-    store.payCard(a.id, s.cycle, amount, s.payDate);
-    toast(t('card.paid'));
+    store.payCard(a.id, s.cycle, amount, s.payDate, from);
     sheet.close();
+    // 引き落とし口座と違う口座で払ったら、次回からその口座にするか聞く
+    if (from !== a.card.debitId && await askKeep('setting.debitAcc', from)) store.updateAccount(a.id, { card: { debitId: from } });
+    toast(t('card.paid'));
   } }, icon('check', { size: 18 }), t('card.payConfirm'));
+  const debitIcon = h('span', { class: 'pay-acc' });
+  const drawDebit = () => setChildren(debitIcon, accIcon(store.get('accounts', from), 36), h('span', { class: 'small ellipsis' }, from ? accName(from) : '—'));
+  drawDebit();
+  const picker = h('div', {});
+  const drawPicker = () => setChildren(picker, accountPicker({ types: ['cash', 'saving'], value: from, onChange: (id) => { from = id; drawDebit(); drawPicker(); btn.disabled = !ok(); } }));
+  drawPicker();
   const sheet = openSheet({
     title: t('card.payTitle'),
     onClose: () => onDone?.(done),
@@ -299,10 +325,11 @@ export function openPaySheet(cardId, { onDone } = {}) {
       h('div', { class: 'pay-flow' },
         h('span', { class: 'pay-acc' }, accIcon(a, 36), h('span', { class: 'small ellipsis' }, a.name)),
         icon('back', { size: 20 }),
-        h('span', { class: 'pay-acc' }, accIcon(store.get('accounts', a.card.debitId), 36), h('span', { class: 'small ellipsis' }, accName(a.card.debitId)))),
+        debitIcon),
       h('p', { class: 'muted small center' }, t('card.payAsk', { date: fmtDate(s.payDate) })),
       h('div', { class: 'amount-row expense' }, h('span', { class: 'amount-kind' }, icon('card', { size: 22 })),
-        amountInput({ value: amount, big: true, onChange: (v) => { amount = v; btn.disabled = !(v > 0); } })),
+        amountInput({ value: amount, big: true, onChange: (v) => { amount = v; btn.disabled = !ok(); } })),
+      field(t('card.payFrom'), picker),
       h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn', onClick: () => sheet.close() }, t('common.later')), btn)),
   });
   return sheet;

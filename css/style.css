@@ -352,7 +352,7 @@ select.input { appearance: auto; }
 .hist-row.cancelled .hist-title, .hist-row.cancelled .hist-amount { text-decoration: line-through; color: var(--muted); }
 .kind-icon { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--fill); color: var(--muted); }
 .k-expense, .k-cardpay, .k-borrow { background: var(--expense-soft); color: var(--expense); }
-.k-income, .k-salary, .k-lend, .k-refund { background: var(--income-soft); color: var(--income); }
+.k-income, .k-salary, .k-lend, .k-refund, .k-points { background: var(--income-soft); color: var(--income); }
 .k-cancel { background: var(--text); color: var(--bg); }
 .k-adj { background: var(--accent-soft); color: var(--accent); }
 .rsv-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
@@ -486,3 +486,14 @@ select.input { appearance: auto; }
   .sheet { border-radius: 16px; }
   .sheet.full { height: 86%; }
 }
+
+/* ホーム: 口座を種類ごとに分ける */
+.acc-group { margin-top: 18px; }
+.acc-group-head { display: flex; align-items: center; gap: 6px; margin: 0 2px 8px; font-size: 15px; font-weight: 700; color: var(--muted); }
+.acc-group-sum { font-variant-numeric: tabular-nums; }
+/* 詳細画面: 登録・編集完了ボタン、OK でキーボードを引っ込める、ポイント利用 */
+.save-pill { min-width: 92px; flex: none; padding: 9px 16px; border-radius: 999px; background: var(--accent); color: var(--accent-text); font-weight: 700; }
+.tx-detail.pad-off .keypad.embedded { display: none; }
+.tx-detail.pad-off .detail-amount-text::after { display: none; }
+.point-row { display: flex; align-items: center; gap: 12px; padding: 8px 0 10px 50px; border-bottom: .5px solid var(--line); }
+.point-row .point-amount { width: 150px; flex: none; }

@@ -26,6 +26,7 @@ export function accName(id) {
 
 export function catLabel(catId, subId) {
   if (catId === '__repay') return t('cat.repay');
+  if (catId === '__points') return t('cat.points');
   const c = store.get('categories', catId);
   if (!c) return t('common.uncategorized');
   if (!subId) return c.name;
@@ -34,7 +35,7 @@ export function catLabel(catId, subId) {
 }
 
 export const TYPE_ICON = { cash: 'wallet', card: 'card', saving: 'piggy' };
-export const KIND_ICON = { expense: 'out', income: 'in', transfer: 'transfer', salary: 'briefcase', cancel: 'xcircle', lend: 'handout', borrow: 'handin', cardpay: 'card', adj: 'scale', refund: 'undo' };
+export const KIND_ICON = { expense: 'out', income: 'in', transfer: 'transfer', salary: 'briefcase', cancel: 'xcircle', lend: 'handout', borrow: 'handin', cardpay: 'card', adj: 'scale', refund: 'undo', points: 'gift' };
 
 // 口座を選ぶチップ。extra は口座の後ろに足す選択肢 [{id, label, icon}]
 export function accountPicker({ types, value, onChange, extra = [], exclude = null }) {
@@ -120,7 +121,7 @@ export function dateTimeFields(st, onChange) {
 // ---- 記録のフォーム ----
 
 export function newTxDraft(type = 'expense') {
-  return { type, amount: null, accountId: null, toAccountId: null, borrowName: '', borrowOn: false, shop: '', catId: null, subId: null, date: store.today(), withTime: true, time: nowTime(), lends: [], id: null, reservationId: null };
+  return { type, amount: null, accountId: null, toAccountId: null, borrowName: '', borrowOn: false, shop: '', pointsOn: false, points: null, catId: null, subId: null, date: store.today(), withTime: true, time: nowTime(), lends: [], id: null, reservationId: null };
 }
 
 export function draftFromTx(tx) {
@@ -134,6 +135,8 @@ export function draftFromTx(tx) {
     borrowOn: tx.type === 'income' && !!tx.borrow,
     // 収入の借入では、お店の欄に借りた人を入れる
     shop: tx.type === 'income' && tx.borrow ? tx.borrow.name : (tx.shop ?? ''),
+    pointsOn: tx.type === 'expense' && (tx.points ?? 0) > 0,
+    points: tx.type === 'expense' && tx.points ? tx.points : null,
     catId: tx.catId,
     subId: tx.subId,
     date: tx.date,

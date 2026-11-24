@@ -1,8 +1,8 @@
 // ホーム（HOME）
 import { store } from '../app-store.js';
 import { fmtDate, t, yen } from '../i18n.js';
-import { accIcon } from '../forms.js';
-import { TYPE_ORDER, activeAccounts, balances, bellItems, cardStatus, totalBalance } from '../ledger.js';
+import { TYPE_ICON, accIcon } from '../forms.js';
+import { TYPE_ORDER, activeAccounts, balances, bellItems, cardStatus, totalBalance, unpaidOf } from '../ledger.js';
 import { openAccountDetail, openAccountForm, openBell } from '../sheets.js';
 import { addIcon, empty, h, icon, setChildren } from '../ui.js';
 
@@ -18,7 +18,7 @@ export function renderHome(root) {
   const accounts = activeAccounts(state);
   const total = totalBalance(state, bal);
 
-  const cards = TYPE_ORDER.flatMap((type) => accounts.filter((a) => a.type === type)).map((a) => {
+  const cardOf = (a) => {
     let body;
     if (a.type === 'card') {
       const s = cardStatus(state, a, today, bal);
@@ -32,7 +32,16 @@ export function renderHome(root) {
     return h('button', { type: 'button', class: `acc-card t-${a.type}`, onClick: () => openAccountDetail(a.id) },
       h('span', { class: 'acc-head' }, accIcon(a, 26), h('span', { class: 'acc-name ellipsis' }, a.name)),
       body);
-  });
+  };
+  // 種類ごと（資金・クレジットカード・貯金）に分けて並べる。見出しの右は合計
+  const groups = TYPE_ORDER.map((type) => {
+    const list = accounts.filter((a) => a.type === type);
+    if (!list.length) return null;
+    const sum = type === 'card' ? list.reduce((s, a) => s + unpaidOf(bal, a.id), 0) : list.reduce((s, a) => s + bal.get(a.id), 0);
+    return h('section', { class: 'acc-group' },
+      h('h2', { class: 'acc-group-head' }, icon(TYPE_ICON[type], { size: 18 }), h('span', { class: 'grow' }, t(`type.${type}`)), h('span', { class: 'acc-group-sum' }, yen(sum))),
+      h('div', { class: 'acc-grid' }, list.map(cardOf)));
+  }).filter(Boolean);
 
   setChildren(root,
     h('header', { class: 'home-head' },
@@ -46,7 +55,7 @@ export function renderHome(root) {
       ? h('div', { class: 'install-hint' }, icon('download', { size: 18 }), h('span', { class: 'grow small' }, t('home.installHint')),
         h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('common.close'), onClick: () => store.setSettings({ installHintClosed: true }) }, icon('close', { size: 18 })))
       : null,
-    cards.length ? h('div', { class: 'acc-grid' }, cards) : empty(t('home.empty'), 'wallet'),
+    groups.length ? groups : empty(t('home.empty'), 'wallet'),
     h('div', { class: 'fab-space' }),
     h('button', { type: 'button', class: 'fab', 'aria-label': t('home.addAccount'), title: t('home.addAccount'), onClick: () => openAccountForm() }, addIcon('wallet')));
 }

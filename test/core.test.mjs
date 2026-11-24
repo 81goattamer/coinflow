@@ -197,3 +197,34 @@ test('shop is kept for expense and income only', () => {
   const c = st.saveTx({ type: 'income', amount: 500, date: '2026-11-22', accountId: cash.id, borrowName: '鈴木', shop: '' });
   assert.equal(c.borrow.name, '鈴木');
 });
+
+test('points: expense counts in full, points count as income, account pays the difference', () => {
+  const { st } = setup();
+  const bank = st.addAccount({ type: 'cash', name: 'B', initial: 10000 });
+  const card = st.addAccount({ type: 'card', name: 'C', initial: 0, card: { closingDay: 15, payDay: 10, payMonths: 1, debitId: bank.id, shift: 'none' } });
+  st.saveTx({ type: 'expense', amount: 1000, points: 200, date: '2026-11-21', accountId: bank.id, catId: 'x' });
+  st.saveTx({ type: 'expense', amount: 500, points: 900, date: '2026-11-21', accountId: card.id, catId: 'x' });
+  const bal = balances(st.state);
+  assert.equal(bal.get(bank.id), 9200);
+  assert.equal(unpaidOf(bal, card.id) + 0, 0); // ポイントは金額までしか使えない
+  const a = analyze(st.state, '2026-11');
+  assert.equal(a.expense, 1500);
+  assert.equal(a.income, 700);
+  assert.equal(a.incCats.get('__points'), 700);
+  assert.equal(historyRows(st.state).filter((r) => r.kind === 'points').length, 2);
+  // 収入にはポイントをつけない
+  assert.equal(st.saveTx({ type: 'income', amount: 100, points: 50, date: '2026-11-21', accountId: bank.id }).points, 0);
+});
+
+test('account type can switch between cash and saving; card paid from another account', () => {
+  const { st } = setup();
+  const bank = st.addAccount({ type: 'cash', name: 'B', initial: 1000 });
+  const sav = st.addAccount({ type: 'saving', name: 'S', initial: 5000 });
+  assert.equal(totalBalance(st.state), 1000);
+  st.updateAccount(sav.id, { type: 'cash' });
+  assert.equal(totalBalance(st.state), 6000);
+  const card = st.addAccount({ type: 'card', name: 'C', initial: 300, card: { closingDay: 15, payDay: 10, payMonths: 1, debitId: bank.id, shift: 'none' } });
+  const tx = st.payCard(card.id, '2026-12', 300, '2027-01-10', sav.id);
+  assert.equal(tx.accountId, sav.id);
+  assert.equal(balances(st.state).get(sav.id), 4700);
+});

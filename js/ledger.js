@@ -12,6 +12,9 @@ export function activeAccounts(state, types = TYPE_ORDER) {
 const doneLends = (tx) => (tx.lends ?? []).filter((l) => l.done);
 export const lendReturned = (tx) => doneLends(tx).reduce((s, l) => s + l.amount, 0);
 export const refundOf = (tx) => (tx.cancel?.state === 'done' ? tx.cancel.refund : 0);
+// ポイント利用: 支出は満額のまま、使ったポイントは収入として足す。口座から出ていくのは差額だけ
+export const POINT_CAT = '__points';
+export const pointsOf = (tx) => (tx.type === 'expense' ? tx.points ?? 0 : 0);
 
 // ---- 残高（4章） ----
 
@@ -23,7 +26,7 @@ export function balances(state) {
   for (const tx of state.txs) {
     switch (tx.type) {
       case 'expense':
-        add(tx.accountId, -tx.amount);
+        add(tx.accountId, -tx.amount + pointsOf(tx));
         for (const l of doneLends(tx)) add(l.accountId, l.amount);
         if (tx.cancel?.state === 'done') add(tx.cancel.to === 'month' ? tx.accountId : tx.cancel.accountId, tx.cancel.refund);
         break;
@@ -90,7 +93,7 @@ export function cardStatus(state, account, today, bal = balances(state)) {
   const after = (c) => {
     let s = 0;
     for (const t of charges) {
-      if (cycleOfDate(card, t.date) > c) s += t.amount;
+      if (cycleOfDate(card, t.date) > c) s += t.amount - pointsOf(t);
       if (t.cancel?.state === 'done' && t.cancel.to === 'month' && t.cancel.cycle > c) s -= t.cancel.refund;
     }
     return s;
@@ -147,6 +150,7 @@ export function analyze(state, month) {
   for (const tx of state.txs) {
     if (tx.type === 'expense' && monthOf(tx.date) === month) {
       put('expense', tx.catId, tx.date, tx.amount - lendReturned(tx) - refundOf(tx));
+      put('income', POINT_CAT, tx.date, pointsOf(tx));
     }
     if (tx.type === 'income') {
       if (monthOf(tx.date) === month) put('income', tx.catId, tx.date, tx.amount);
@@ -163,6 +167,7 @@ export function historyRows(state) {
   for (const tx of state.txs) {
     const filter = tx.type === 'cardpay' ? 'expense' : tx.type;
     rows.push({ key: tx.id, kind: 'tx', filter, date: tx.date, time: tx.time, tx });
+    if (pointsOf(tx)) rows.push({ key: `${tx.id}:p`, kind: 'points', filter: 'income', date: tx.date, time: tx.time, tx });
     for (const l of tx.lends ?? []) {
       if (l.done) rows.push({ key: `${tx.id}:${l.id}`, kind: 'lend', filter: 'expense', date: l.doneDate, time: l.doneTime, tx, party: l });
     }
@@ -206,6 +211,7 @@ export function rowAmountFor(row, id) {
     case 'lend': return row.party.amount;
     case 'borrow': return -tx.amount;
     case 'refund': return tx.cancel.refund;
+    case 'points': return tx.points;
     default:
       if (tx.type === 'income') return tx.amount;
       if (tx.type === 'expense') return -tx.amount;

@@ -4,6 +4,7 @@ import { store } from './app-store.js';
 import { catIcon } from './store.js';
 import { t, yen } from './i18n.js';
 import { amountTarget, embeddedPad, setHardwareTarget } from './keypad.js';
+import { evaluate } from './calc.js';
 import { BORROW, accIcon, accName, catLabel, dateTimeFields, KIND_ICON } from './forms.js';
 import { activeAccounts, balances, unpaidOf } from './ledger.js';
 import { h, icon, openSheet, setChildren, switchInput, toast } from './ui.js';
@@ -39,7 +40,7 @@ export function openAccountPicker({ title, onPick, ...rest }) {
 export function txDetail(st, { title, onBack, onDone, onCategory, editing = false }) {
   const root = h('div', { class: 'tx-detail' });
   const amountText = h('span', { class: 'detail-amount-text' });
-  const main = amountTarget({ value: st.amount, text: amountText, onChange: (v) => { st.amount = v; } });
+  const main = amountTarget({ value: st.amount, text: amountText, onChange: (v) => { st.amount = v; updateMax?.(); } });
   main.editing = true;
   main.show();
   let target = main;
@@ -47,7 +48,10 @@ export function txDetail(st, { title, onBack, onDone, onCategory, editing = fals
   const isInc = st.type === 'income';
   const isTr = st.type === 'transfer';
 
+  // OK は数字の入力を終えてキーボードを引っ込めるだけ。金額の欄を押すとまた出る
+  const showPad = (on) => root.classList.toggle('pad-off', !on);
   const setTarget = (tg) => {
+    showPad(true);
     if (target !== tg && target !== main) target.commit();
     if (target !== main) target.editing = false;
     target = tg;
@@ -71,11 +75,18 @@ export function txDetail(st, { title, onBack, onDone, onCategory, editing = fals
     onPick: (id) => { st.toAccountId = id; draw(); },
   });
 
+  const doneNumber = () => {
+    if (target !== main) {
+      target.commit();
+      setTarget(main);
+    }
+    main.commit();
+    showPad(false);
+  };
   const save = () => {
     if (target !== main) {
       target.commit();
       setTarget(main);
-      return;
     }
     const v = main.commit();
     if (!(v > 0)) {
@@ -101,6 +112,10 @@ export function txDetail(st, { title, onBack, onDone, onCategory, editing = fals
         toast(t('lend.over'));
         return undefined;
       }
+      if (st.pointsOn && st.points > st.amount) {
+        toast(t('points.over'));
+        return undefined;
+      }
     }
     return finish();
   };
@@ -123,6 +138,7 @@ export function txDetail(st, { title, onBack, onDone, onCategory, editing = fals
       catId: st.catId,
       subId: st.subId,
       shop: isInc && st.borrowOn ? '' : st.shop,
+      points: isExp && st.pointsOn ? st.points ?? 0 : 0,
       borrowName,
       lends: st.lends,
       reservationId: st.reservationId,
@@ -177,9 +193,45 @@ export function txDetail(st, { title, onBack, onDone, onCategory, editing = fals
         h('span', { class: 'grow drow-body' }, t('field.borrowSwitch')),
         switchInput(st.borrowOn, (v) => { st.borrowOn = v; draw(); }, t('field.borrowSwitch'))));
     }
+    if (isExp) parts.push(pointRows());
     if (isExp) parts.push(lendRows());
     setChildren(body, parts);
     if (target !== main && !body.contains(target.el)) setTarget(main);
+  };
+
+  // ポイント利用（支出だけ）。入れた金額が上限
+  let pointTarget = null;
+  let maxLabel = null;
+  const updateMax = () => { if (maxLabel) maxLabel.textContent = st.amount > 0 ? t('points.max', { amt: yen(st.amount) }) : ''; };
+  const pointRows = () => {
+    const out = [h('label', { class: 'drow' }, h('span', { class: 'drow-icon' }, icon('gift', { size: 22 })),
+      h('span', { class: 'grow drow-body' }, t('points.use')),
+      switchInput(st.pointsOn, (v) => { st.pointsOn = v; draw(); if (v && pointTarget) setTarget(pointTarget); }, t('points.use')))];
+    pointTarget = null;
+    maxLabel = h('span', { class: 'grow muted small' });
+    updateMax();
+    if (st.pointsOn) {
+      const text = h('span', { class: 'amount-text' });
+      const btn = h('button', { type: 'button', class: 'amount-field lend-amount point-amount', 'aria-label': t('points.amount') }, text);
+      const tg = amountTarget({ value: st.points, text, onChange: (v) => { st.points = v; } });
+      // 上限は支出の金額
+      const clamp = () => {
+        const v = evaluate(tg.expr);
+        if (st.amount > 0 && v > st.amount) {
+          tg.set(st.amount);
+          st.points = st.amount;
+        }
+      };
+      const press = tg.press.bind(tg);
+      tg.press = (k) => { press(k); clamp(); };
+      tg.el = btn;
+      btn.addEventListener('click', () => setTarget(tg));
+      pointTarget = tg;
+      out.push(h('div', { class: 'point-row' },
+        maxLabel,
+        btn));
+    }
+    return h('div', { class: 'points' }, out);
   };
 
   const lendRows = () => h('div', { class: 'lends' },
@@ -201,14 +253,14 @@ export function txDetail(st, { title, onBack, onDone, onCategory, editing = fals
   const left = h('button', { type: 'button', class: 'key side pick', 'data-key': 'pick', onClick: () => (isTr && st.accountId ? pickTo() : pickFrom()) },
     icon('wallet', { size: 26 }), h('span', {}, isInc ? t('key.pickTo') : t('key.pickFrom')));
   const pad = st.type === 'cardpay'
-    ? embeddedPad({ getTarget: () => target, onOk: save, left: h('span', {}) })
-    : embeddedPad({ getTarget: () => target, onOk: save, left });
+    ? embeddedPad({ getTarget: () => target, onOk: doneNumber, left: h('span', {}) })
+    : embeddedPad({ getTarget: () => target, onOk: doneNumber, left });
 
   setChildren(root,
     h('header', { class: 'detail-head-bar' },
       onBack ? h('button', { type: 'button', class: 'back-pill', onClick: onBack }, icon('back', { size: 22 }), t('common.back')) : h('span', { class: 'back-space' }),
       h('h2', { class: 'detail-title' }, h('span', { class: `title-kind k-${st.type}` }, icon(KIND_ICON[st.type], { size: 16 })), title),
-      h('span', { class: 'back-space' })),
+      h('button', { type: 'button', class: 'save-pill', onClick: () => save() }, editing ? t('rec.editDone') : t('rec.register'))),
     body,
     pad);
   draw();
@@ -221,7 +273,10 @@ export function txDetail(st, { title, onBack, onDone, onCategory, editing = fals
   setHardwareTarget((k) => {
     if (!document.body.contains(root)) return false;
     if (k === 'close') return false;
-    if (k === 'ok') save();
+    if (k === 'ok') {
+      if (root.classList.contains('pad-off')) save();
+      else doneNumber();
+    }
     else target.press(k);
     return true;
   });

@@ -74,6 +74,7 @@ const ICONS = {
   store: 'M3 9l1.5-5h15L21 9M3 9h18M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0M5 12v8h14v-8M10 20v-5h4v5',
   user: 'M20 21a8 8 0 0 0-16 0M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10z',
   building: 'M4 21V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v17M15 9h4a1 1 0 0 1 1 1v11M2 21h20M8 7h3M8 11h3M8 15h3',
+  gift: 'M20 12v9H4v-9M2 7h20v5H2zM12 21V7M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z',
   keyboard: 'M3 6h18a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zM6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10',
 };
 
@@ -156,7 +157,7 @@ export function hasOpenSheet() {
   return openSheets.length > 0;
 }
 
-export function confirmDialog({ message, okLabel = t('common.ok'), danger = false }) {
+export function confirmDialog({ message, okLabel = t('common.ok'), cancelLabel = t('common.cancel'), danger = false }) {
   return new Promise((resolve) => {
     let done = false;
     const finish = (v) => {
@@ -171,7 +172,7 @@ export function confirmDialog({ message, okLabel = t('common.ok'), danger = fals
       content: h('div', { class: 'confirm' },
         h('p', { class: 'confirm-msg' }, message),
         h('div', { class: 'btn-row' },
-          h('button', { type: 'button', class: 'btn', onClick: () => finish(false) }, t('common.cancel')),
+          h('button', { type: 'button', class: 'btn', onClick: () => finish(false) }, cancelLabel),
           h('button', { type: 'button', class: `btn ${danger ? 'danger' : 'primary'}`, onClick: () => finish(true) }, okLabel))),
     });
   });

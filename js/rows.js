@@ -68,6 +68,13 @@ export function rowView(row, { onClick, accountId = null } = {}) {
       amount = -tx.amount;
       cls = 'minus';
       break;
+    case 'points':
+      kind = 'points';
+      title = t('kind.points');
+      sub = `${tx.accountId ? accName(tx.accountId) : t('kind.borrow')} · ${txTitle(tx)}`;
+      amount = tx.points;
+      cls = 'plus';
+      break;
     case 'refund':
       kind = 'refund';
       title = t('kind.refund');
