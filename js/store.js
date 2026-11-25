@@ -144,7 +144,8 @@ export class Store {
 
   // ---- 口座（ACC） ----
 
-  addAccount({ type, name, memo = '', icon, initial = 0, card = null }) {
+  // later は、カードの次の次・その後の支払い [{ cycle, amount }]
+  addAccount({ type, name, memo = '', icon, initial = 0, card = null, later = [] }) {
     const order = Math.max(-1, ...this.state.accounts.map((a) => a.order)) + 1;
     const row = {
       id: uid(),
@@ -159,7 +160,9 @@ export class Store {
       createdAt: this.iso(),
       updatedAt: this.iso(),
     };
-    return this.done(this.put('accounts', row));
+    this.put('accounts', row);
+    if (type === 'card') for (const l of later) this.adjustBalance(row.id, -pos(l.amount), false, l.cycle);
+    return this.done(row);
   }
 
   updateAccount(id, patch) {
@@ -172,12 +175,21 @@ export class Store {
     return this.done(this.put('accounts', row));
   }
 
-  // 今の残高を入れて差をバイアス値として残す（ACC-22）。diff は残高の増減
-  adjustBalance(accountId, diff, show) {
+  // 今の残高を入れて差をバイアス値として残す（ACC-22）。diff は残高の増減。cycle はカードのどの支払い回の分か
+  adjustBalance(accountId, diff, show, cycle = null) {
     if (!diff) return null;
     return this.done(this.put('adjustments', {
-      id: uid(), accountId, diff: int(diff), date: this.today(), time: nowTime(this.now()), show: !!show, createdAt: this.iso(),
+      id: uid(), accountId, diff: int(diff), cycle, date: this.today(), time: nowTime(this.now()), show: !!show, createdAt: this.iso(),
     }));
+  }
+
+  // 調整を履歴に残す
+  showAdjustments(ids) {
+    for (const id of ids) {
+      const a = this.get('adjustments', id);
+      if (a) this.put('adjustments', { ...a, show: true });
+    }
+    this.done();
   }
 
   deleteAccount(id) {

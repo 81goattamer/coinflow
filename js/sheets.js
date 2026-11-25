@@ -4,13 +4,13 @@ import { catIcon } from './store.js';
 import { fmtDate, t, yen } from './i18n.js';
 import { amountInput, closeKeypad } from './keypad.js';
 import {
-  KIND_ICON, TYPE_ICON, accIcon, accName, accountPicker, catLabel, daySelect, draftFromRsv, draftFromTx, newTxDraft, repeatLabel, rsvForm, shiftSeg, txLabel,
+  KIND_ICON, TYPE_ICON, accIcon, accName, accountPicker, catLabel, categoryOk, daySelect, draftFromRsv, draftFromTx, newTxDraft, repeatLabel, rsvForm, shiftSeg, txLabel,
 } from './forms.js';
 import { openCategoryChooser, txDetail } from './tx-detail.js';
-import { balances, bellItems, cardStatus, historyRows, isIrregular, itemPayments, openParties, rowTouches, unpaidCycles, unpaidOf } from './ledger.js';
+import { balances, bellItems, cardPlan, cardStatus, historyRows, isIrregular, itemPayments, newCardPlan, openParties, rowTouches, unpaidCycles, unpaidOf } from './ledger.js';
 import { rowView, statusLines } from './rows.js';
 import {
-  actionMenu, addIcon, confirmDialog, empty, field, h, icon, iconButton, openSheet, seg, setChildren, switchInput, toast,
+  actionMenu, addIcon, confirmDialog, empty, field, h, icon, iconButton, openSheet, seg, setChildren, toast,
 } from './ui.js';
 
 const EMOJIS = ['👛', '💴', '💳', '🏦', '🐷', '💰', '🪙', '💵', '🏧', '📱', '🛒', '🍙', '☕', '🚃', '🎮', '🎁', '🏠', '✈️', '⭐', '🍀', '🐱', '🐶', '🌸', '🔵', '🟢', '🟠', '🔴', '🟣'];
@@ -48,7 +48,9 @@ export function openAccountForm(account = null) {
     memo: account?.memo ?? '',
     icon: account?.icon ?? null,
     amount: editing ? current : null,
-    showAdj: true,
+    pay: [null, null, null], // カードの次・次の次・その後の支払い
+    payBase: [0, 0, 0], // 合計を入れている間の、元の内訳
+    payTouched: false,
     card: { closingDay: 15, payDay: 10, payMonths: 1, debitId: null, shift: 'next', ...(account?.card ?? {}) },
   };
   const root = h('div', { class: 'form' });
@@ -56,12 +58,74 @@ export function openAccountForm(account = null) {
   const debits = () => store.state.accounts.filter((a) => !a.deleted && a.type !== 'card');
   const valid = () => {
     if (!st.name.trim()) return false;
-    if (!editing && st.amount == null) return false;
+    if (!editing && (st.type === 'card' ? st.pay[0] : st.amount) == null) return false;
     if (st.type === 'card' && !store.get('accounts', st.card.debitId)) return false;
     return true;
   };
   const check = () => { if (saveBtn) saveBtn.disabled = !valid(); };
   const defIcon = () => ({ kind: 'emoji', value: st.type === 'card' ? '💳' : st.type === 'saving' ? '🐷' : '👛' });
+  const paySum = () => st.pay.reduce((s, v) => s + (v ?? 0), 0);
+  const plan = () => (editing ? cardPlan(store.live, { ...account, card: { ...account.card, ...st.card } }, store.today()) : newCardPlan(st.card, store.today()));
+  const payLabel = (i, p) => (i === 2 ? t('card.pay2') : t('card.payDateOf', { label: t(`card.pay${i}`), date: fmtDate(p.payDate, { week: false }) }));
+  // カードの支払いの金額。設定画面では合計（今の未払い額）からも直せて、差は次の支払いから順に動かす
+  const payFields = () => {
+    const parts = plan();
+    if (editing && !st.payTouched) {
+      st.pay = parts.map((p) => p.amount);
+      st.payBase = [...st.pay];
+    }
+    let total = null;
+    const sumLine = h('p', { class: 'muted small pay-sum' });
+    const showSum = () => {
+      if (total) total.setValue(paySum());
+      else sumLine.textContent = t('card.paySum', { amt: yen(paySum()) });
+    };
+    const inputs = parts.map((p, i) => amountInput({
+      value: st.pay[i],
+      label: payLabel(i, p),
+      onChange: (v) => {
+        if (v === st.pay[i]) return;
+        st.pay[i] = v;
+        st.payBase = st.pay.map((x) => x ?? 0);
+        st.payTouched = true;
+        showSum();
+        check();
+      },
+    }));
+    if (editing) {
+      total = amountInput({
+        value: paySum(),
+        label: t('acc.currentUnpaid'),
+        onChange: (v) => {
+          if (v == null ? total.classList.contains('editing') : v === paySum()) return;
+          if (v == null) {
+            // 空のまま閉じたら元に戻す
+            total.setValue(paySum());
+            return;
+          }
+          const next = [...st.payBase];
+          next[0] += Math.max(0, v) - next.reduce((s, n) => s + n, 0);
+          for (const i of [0, 1]) {
+            if (next[i] < 0) {
+              next[i + 1] += next[i];
+              next[i] = 0;
+            }
+          }
+          st.pay = next;
+          st.payTouched = true;
+          inputs.forEach((el, i) => el.setValue(next[i]));
+        },
+      });
+    } else {
+      showSum();
+    }
+    return [
+      editing ? field(t('acc.currentUnpaid'), total) : null,
+      // 3回目以降は、翌々月払いのときか、すでにあるときだけ出す
+      inputs.map((el, i) => (i < 2 || st.card.payMonths === 2 || st.pay[2] ? field(payLabel(i, parts[i]), el) : null)),
+      editing ? null : sumLine,
+    ];
+  };
   const draw = () => {
     const ic = st.icon ?? defIcon();
     const fileIn = h('input', { type: 'file', accept: 'image/*', hidden: true, onChange: async (e) => {
@@ -90,20 +154,21 @@ export function openAccountForm(account = null) {
       fileIn));
     parts.push(field(t('common.name'), h('input', { class: 'input', value: st.name, maxlength: 30, 'aria-label': t('common.name'), onInput: (e) => { st.name = e.target.value; check(); } })));
     parts.push(field(t('acc.memo'), h('input', { class: 'input', value: st.memo, maxlength: 80, 'aria-label': t('acc.memo'), onInput: (e) => { st.memo = e.target.value; } })));
-    const amountLabel = editing ? (st.type === 'card' ? t('acc.currentUnpaid') : t('acc.current')) : (st.type === 'card' ? t('card.initialUnpaid') : t('acc.initial'));
-    parts.push(field(amountLabel, amountInput({ value: st.amount, label: amountLabel, onChange: (v) => { st.amount = v; check(); } })));
-    if (editing) {
-      parts.push(h('label', { class: 'toggle-row' }, icon('scale', { size: 20 }), h('span', { class: 'grow small' }, t('acc.showAdj')), switchInput(st.showAdj, (v) => { st.showAdj = v; }, t('acc.showAdj'))));
+    if (st.type !== 'card') {
+      const amountLabel = editing ? t('acc.current') : t('acc.initial');
+      parts.push(field(amountLabel, amountInput({ value: st.amount, label: amountLabel, onChange: (v) => { st.amount = v; check(); } })));
     }
     if (st.type === 'card') {
       const c = st.card;
       if (!debits().length) parts.push(h('p', { class: 'error' }, t('card.noDebit')));
       parts.push(h('div', { class: 'grid2' },
-        field(t('card.closing'), daySelect(c.closingDay, (v) => { c.closingDay = v; })),
-        field(t('card.payDay'), daySelect(c.payDay, (v) => { c.payDay = v; }))));
+        field(t('card.closing'), daySelect(c.closingDay, (v) => { c.closingDay = v; draw(); })),
+        field(t('card.payDay'), daySelect(c.payDay, (v) => { c.payDay = v; draw(); }))));
       parts.push(field(t('card.payMonths'), seg([[1, t('card.next1')], [2, t('card.next2')]], c.payMonths, (v) => { c.payMonths = v; draw(); }, 'wide small')));
       parts.push(field(t('field.holiday'), shiftSeg(c.shift, (v) => { c.shift = v; draw(); })));
       parts.push(field(t('card.debit'), accountPicker({ types: ['cash', 'saving'], value: c.debitId, onChange: (id) => { c.debitId = id; draw(); } })));
+      // 支払日が決まってから金額を入れる
+      parts.push(payFields());
     }
     saveBtn = h('button', { type: 'button', class: 'btn primary block', onClick: save }, editing ? t('common.save') : t('common.add'));
     parts.push(saveBtn);
@@ -113,19 +178,37 @@ export function openAccountForm(account = null) {
     setChildren(root, parts);
     check();
   };
-  const save = () => {
+  const save = async () => {
     if (!valid()) return;
+    closeKeypad();
     const card = st.type === 'card' ? { closingDay: st.card.closingDay, payDay: st.card.payDay, payMonths: st.card.payMonths, debitId: st.card.debitId, shift: st.card.shift } : null;
     if (editing) {
       store.updateAccount(account.id, { name: st.name, memo: st.memo, icon: st.icon ?? defIcon(), ...(card ? { card } : { type: st.type }) });
-      if (st.amount != null && st.amount !== current) {
-        const diff = st.type === 'card' ? current - st.amount : st.amount - current;
-        store.adjustBalance(account.id, diff, st.showAdj);
+      const lines = [];
+      const adjs = [];
+      if (card) {
+        const parts = cardPlan(store.live, store.get('accounts', account.id), store.today());
+        const want = st.pay.map((v) => Math.max(0, v ?? 0));
+        if (st.payTouched && parts.some((p, i) => p.amount !== want[i])) {
+          parts.forEach((p, i) => {
+            if (p.amount !== want[i]) lines.push(`${payLabel(i, p)} ${yen(p.amount)} → ${yen(want[i])}`);
+            if (want[i] !== p.raw) adjs.push(store.adjustBalance(account.id, p.raw - want[i], false, p.cycle));
+          });
+        }
+      } else if (st.amount != null && st.amount !== current) {
+        lines.push(`${yen(current)} → ${yen(st.amount)}`);
+        adjs.push(store.adjustBalance(account.id, st.amount - current, false));
       }
+      sheet.close();
       toast(t('rec.updated'));
-    } else {
-      store.addAccount({ type: st.type, name: st.name, memo: st.memo, icon: st.icon ?? defIcon(), initial: st.amount, card });
+      // 調整は先に保存しておき、履歴に残すかだけを聞く
+      if (adjs.length && await confirmDialog({ message: [t('acc.adjAsk'), ...lines].join('\n'), okLabel: t('acc.adjShow'), cancelLabel: t('acc.adjHide') })) {
+        store.showAdjustments(adjs.map((a) => a.id));
+      }
+      return;
     }
+    const later = card ? newCardPlan(card, store.today()).slice(1).map((p, i) => ({ cycle: p.cycle, amount: st.pay[i + 1] ?? 0 })) : [];
+    store.addAccount({ type: st.type, name: st.name, memo: st.memo, icon: st.icon ?? defIcon(), initial: card ? st.pay[0] : st.amount, card, later });
     sheet.close();
   };
   const remove = async () => {
@@ -260,6 +343,20 @@ export function openRegisterSheet(rsvId) {
       toast(t('rec.saved'));
     },
   });
+}
+
+// 定期の支出の承認。予約の内容のまま記録する。金額などが足りないときは登録シートを開く
+export function approveRsv(id) {
+  const r = store.get('reservations', id);
+  if (!r) return;
+  const acc = store.get('accounts', r.accountId);
+  if (!r.amount || !acc || acc.deleted || !categoryOk(r.catId, r.subId)) {
+    openRegisterSheet(id);
+    return;
+  }
+  store.saveTx({ type: r.type, name: r.name, amount: r.amount, date: r.date, time: null, accountId: r.accountId, catId: r.catId, subId: r.subId, reservationId: r.id });
+  store.advanceReservation(r.id);
+  toast(t('hist.approved'));
 }
 
 // 「次回からの○○を△△に変更しますか？」。変更を維持するなら true

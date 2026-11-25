@@ -99,7 +99,7 @@ export function categoryPicker({ kind, catId, subId, onChange }) {
 }
 
 // カテゴリが選べているか（サブカテゴリがあるカテゴリはサブカテゴリまで）
-function categoryOk(catId, subId) {
+export function categoryOk(catId, subId) {
   const c = store.get('categories', catId);
   if (!c) return false;
   return !c.subs.length || c.subs.some((s) => s.id === subId);

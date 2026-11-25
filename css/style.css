@@ -450,7 +450,7 @@ select.input { appearance: auto; }
 .menu-item.tall span { display: flex; flex-direction: column; }
 .menu-item.tall small { color: var(--muted); font-size: 13px; }
 .confirm { display: flex; flex-direction: column; gap: 12px; padding-bottom: 8px; }
-.confirm-msg { margin: 0; font-size: 16px; }
+.confirm-msg { margin: 0; font-size: 16px; white-space: pre-line; }
 
 .toast {
   position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 64px); z-index: 100;
@@ -514,3 +514,4 @@ select.input { appearance: auto; }
 .rsv-group-head > .icon { color: var(--muted); }
 .rsv-group-head[aria-expanded="true"] { background: var(--fill); }
 .due-badge { min-width: 20px; height: 20px; border-radius: 10px; padding: 0 6px; background: #e0201b; color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; }
+.pay-sum { margin: -6px 0 0; text-align: right; }

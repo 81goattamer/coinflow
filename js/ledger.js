@@ -20,6 +20,8 @@ export const pointsOf = (tx) => (tx.type === 'expense' ? tx.points ?? 0 : 0);
 
 export const isIrregular = (rsv) => rsv?.repeat?.kind === 'irregular';
 
+export const isRegular = (rsv) => rsv.type !== 'salary' && ['days', 'weekly', 'monthly'].includes(rsv.repeat?.kind);
+
 // 不定期の支払いのうち、まだ支払日が来ていないもの。履歴にも計算にも入れない
 export const isPlanned = (tx, today) => !!tx.itemId && tx.date > today;
 
@@ -113,20 +115,30 @@ export function startCycle(card) {
   return c;
 }
 
-// カードの状態: 未払い額と次の回（支払日・支払額・支払日が来たか）
-export function cardStatus(state, account, today, bal = balances(state)) {
+const paidCycles = (state, id) => new Set(state.txs.filter((t) => t.type === 'cardpay' && t.cardId === id).map((t) => t.cycle));
+
+// 回 c より後の分（利用・返金・回を決めた調整）を返す関数を作る
+function afterOf(state, account) {
   const card = account.card;
-  const unpaid = unpaidOf(bal, account.id);
   const charges = state.txs.filter((t) => t.type === 'expense' && t.accountId === account.id);
-  const paid = new Set(state.txs.filter((t) => t.type === 'cardpay' && t.cardId === account.id).map((t) => t.cycle));
-  const after = (c) => {
+  const adjs = state.adjustments.filter((a) => a.accountId === account.id && a.cycle);
+  return (c) => {
     let s = 0;
+    for (const a of adjs) if (a.cycle > c) s -= a.diff;
     for (const t of charges) {
       if (cycleOfDate(card, t.date) > c) s += t.amount - pointsOf(t);
       if (t.cancel?.state === 'done' && t.cancel.to === 'month' && t.cancel.cycle > c) s -= t.cancel.refund;
     }
     return s;
   };
+}
+
+// カードの状態: 未払い額と次の回（支払日・支払額・支払日が来たか）
+export function cardStatus(state, account, today, bal = balances(state)) {
+  const card = account.card;
+  const unpaid = unpaidOf(bal, account.id);
+  const paid = paidCycles(state, account.id);
+  const after = afterOf(state, account);
   let c = startCycle(card);
   for (let i = 0; i < 600; i++, c = addMonths(c, 1)) {
     if (paid.has(c)) continue;
@@ -136,6 +148,40 @@ export function cardStatus(state, account, today, bal = balances(state)) {
     return { unpaid, cycle: c, payDate, amount, due: payDate <= today };
   }
   return { unpaid, cycle: null, payDate: null, amount: 0, due: false };
+}
+
+// 次・次の次・その後の支払い（ACC-13・ACC-22）。その後は3回目以降をまとめたもの。
+// amount は払う額（0 以上）、raw はその回に入っている額（払いすぎなどで負にもなる。3つの合計が未払い額）
+export function cardPlan(state, account, today) {
+  const st = cardStatus(state, account, today);
+  const paid = paidCycles(state, account.id);
+  const after = afterOf(state, account);
+  const nextOf = (c) => {
+    let n = addMonths(c, 1);
+    while (paid.has(n)) n = addMonths(n, 1);
+    return n;
+  };
+  const c1 = st.cycle ?? cycleOfDate(account.card, today);
+  const c2 = nextOf(c1);
+  const c3 = nextOf(c2);
+  const raw = [st.unpaid - after(c1), after(c1) - after(c2), after(c2)];
+  let sum = 0;
+  let paidSum = 0;
+  return [c1, c2, c3].map((cycle, i) => {
+    sum += raw[i];
+    const amount = Math.max(0, sum - paidSum);
+    paidSum += amount;
+    return { cycle, payDate: payDateOf(account.card, cycle), raw: raw[i], amount };
+  });
+}
+
+// これから登録するカードの、次・次の次・その後の支払い回
+export function newCardPlan(card, today) {
+  const c1 = startCycle({ ...card, startDate: today });
+  return [0, 1, 2].map((i) => {
+    const cycle = addMonths(c1, i);
+    return { cycle, payDate: payDateOf(card, cycle), raw: 0, amount: 0 };
+  });
 }
 
 // 支払日が来たカード（CARD-01）

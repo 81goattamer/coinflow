@@ -1,8 +1,8 @@
 // 履歴の1行（HIST-10、LEND-05、CXL-04）。履歴タブと口座の明細で使う
 import { store } from './app-store.js';
-import { t, yen } from './i18n.js';
+import { fmtDate, t, yen } from './i18n.js';
 import { KIND_ICON, accName, catLabel, txLabel } from './forms.js';
-import { rowAmountFor } from './ledger.js';
+import { payDateOf, rowAmountFor } from './ledger.js';
 import { h, icon } from './ui.js';
 
 // 記録の下に書く状態
@@ -52,6 +52,10 @@ export function rowView(row, { onClick, accountId = null } = {}) {
       kind = 'adj';
       title = t('kind.adj');
       sub = accName(row.adj.accountId);
+      if (row.adj.cycle) {
+        const card = store.get('accounts', row.adj.accountId)?.card;
+        if (card) sub += ` · ${t('card.payOf', { date: fmtDate(payDateOf(card, row.adj.cycle), { year: false, week: false }) })}`;
+      }
       amount = row.adj.diff;
       cls = 'neutral';
       break;

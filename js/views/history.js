@@ -2,10 +2,10 @@
 import { store } from '../app-store.js';
 import { fmtDate, t, yen } from '../i18n.js';
 import { accName, txLabel } from '../forms.js';
-import { historyRows, isIrregular, itemPayments, openParties, orphanPlanned, pendingCancels, pendingLends } from '../ledger.js';
+import { historyRows, isIrregular, isRegular, itemPayments, openParties, orphanPlanned, pendingCancels, pendingLends } from '../ledger.js';
 import { rowView } from '../rows.js';
 import {
-  openCancelSheet, openItem, openPartySheet, openPlannedMenu, openRegisterSheet, openRowMenu, openRsvEdit, plannedRow, rsvSub, rsvTitle, withdrawCancel,
+  approveRsv, openCancelSheet, openItem, openPartySheet, openPlannedMenu, openRegisterSheet, openRowMenu, openRsvEdit, plannedRow, rsvSub, rsvTitle, withdrawCancel,
 } from '../sheets.js';
 import { actionMenu, confirmDialog, empty, h, icon, iconButton, seg, setChildren, toast } from '../ui.js';
 
@@ -51,7 +51,8 @@ function historyList(root) {
   })];
 }
 
-// 予約（HIST-20〜25）: 不定期・給与（押すと一覧が開く） → キャンセル予約 → 貸与・借入 → 日付順の予約
+// 予約（HIST-20〜25）: 承認待ち（日付が来た定期の支出） → 不定期・給与・定期収入・定期支出・未徴収（押すと一覧が開く）
+// → キャンセル予約 → 借入 → 日付順の予約
 function reserveList(root) {
   const today = store.today();
   const cancels = pendingCancels(store.live);
@@ -82,7 +83,7 @@ function reserveList(root) {
         h('button', { type: 'button', class: 'mini-btn primary', onClick: () => openCancelSheet(tx.id) }, t('cxl.confirm')),
         h('button', { type: 'button', class: 'mini-btn', onClick: () => withdrawCancel(tx.id) }, t('cxl.withdraw'))))));
 
-  const lendRows = lends.map((tx) => {
+  const lendRow = (tx) => {
     const parties = openParties(tx);
     const role = parties.some((p) => p.role === 'lend') ? 'lend' : 'borrow';
     return h('button', { type: 'button', class: 'rsv-row', onClick: () => openPartySheet(tx.id) },
@@ -92,20 +93,26 @@ function reserveList(root) {
         h('span', { class: 'hist-sub ellipsis' }, `${fmtDate(tx.date, { year: false })} · ${yen(tx.amount)}`),
         h('span', { class: 'party-dots' }, parties.map((p) => h('span', { class: `party-dot ${p.done ? 'done' : ''}` }, p.done ? icon('check', { size: 12 }) : null, p.name)))),
       icon('chevron', { size: 18 }));
-  });
+  };
+  // 返してもらっていない貸与があるもの（未徴収）と、借入だけのもの
+  const hasOpenLend = (tx) => openParties(tx).some((p) => p.role === 'lend' && !p.done);
+  const uncollected = lends.filter(hasOpenLend);
+  const borrowRows = lends.filter((tx) => !hasOpenLend(tx)).map(lendRow);
 
   const rsvRow = (r) => {
     const due = r.date <= today;
+    const approve = due && isRegular(r) && r.type === 'expense';
     return h('div', { class: `rsv-row ${due ? 'due' : ''}` },
       h('span', { class: `kind-icon k-${r.type}` }, icon(r.type === 'salary' ? 'briefcase' : r.type === 'income' ? 'in' : 'out', { size: 18 })),
       h('span', { class: 'grow hist-main' },
         h('span', { class: 'hist-title ellipsis' }, rsvTitle(r)),
         h('span', { class: 'hist-sub ellipsis' }, `${fmtDate(r.date)} · ${rsvSub(r)}`),
         due ? h('span', { class: 'rsv-actions' },
-          h('button', { type: 'button', class: 'mini-btn primary', onClick: () => openRegisterSheet(r.id) }, t('hist.register')),
+          h('button', { type: 'button', class: 'mini-btn primary', onClick: () => (approve ? approveRsv(r.id) : openRegisterSheet(r.id)) }, t(approve ? 'hist.approve' : 'hist.register')),
           h('button', { type: 'button', class: 'mini-btn', onClick: () => { store.advanceReservation(r.id); toast(t('hist.skipped')); } }, icon('skip', { size: 14 }), t('hist.skip'))) : null),
       h('span', { class: 'hist-amount' }, r.amount != null ? yen(r.amount) : '—'),
       iconButton('more', t('common.more'), () => actionMenu(rsvTitle(r), [
+        approve ? { label: t('hist.approveEdit'), icon: 'check', onClick: () => openRegisterSheet(r.id) } : null,
         { label: t('common.edit'), icon: 'edit', onClick: () => openRsvEdit(r.id) },
         { label: t('common.delete'), icon: 'trash', danger: true, onClick: async () => {
           if (await confirmDialog({ message: t('hist.rsvDeleteAsk'), okLabel: t('common.delete'), danger: true })) store.deleteReservation(r.id);
@@ -113,10 +120,16 @@ function reserveList(root) {
       ]), 'row-more'));
   };
   const salaries = rsvs.filter((r) => r.type === 'salary');
-  const rsvRows = rsvs.filter((r) => r.type !== 'salary').map(rsvRow);
+  const regulars = (type) => rsvs.filter((r) => isRegular(r) && r.type === type);
+  const regIncomes = regulars('income');
+  // 定期の支出は、日付が来たら見出しの外に出して承認を待つ
+  const waiting = regulars('expense').filter((r) => r.date <= today);
+  const regExpenses = regulars('expense').filter((r) => r.date > today);
+  const rsvRows = rsvs.filter((r) => r.type !== 'salary' && !isRegular(r)).map(rsvRow);
+  const dueCount = (list) => list.filter((r) => r.date <= today).length;
 
   // 見出しを押すと、その一覧が開く。日付が来たものがあれば件数を赤丸で出す
-  const group = (id, ic, label, names, rows, due = 0) => {
+  const group = (id, ic, label, names, rows, due = 0, cls = id) => {
     if (!rows.length) return null;
     const open = openGroups.has(id);
     return h('div', { class: 'card list rsv-group' },
@@ -125,7 +138,7 @@ function reserveList(root) {
         else openGroups.add(id);
         renderHistory(root);
       } },
-      h('span', { class: `kind-icon k-${id}` }, icon(ic, { size: 18 })),
+      h('span', { class: `kind-icon k-${cls}` }, icon(ic, { size: 18 })),
       h('span', { class: 'grow hist-main' },
         h('span', { class: 'hist-title ellipsis' }, label),
         open ? null : h('span', { class: 'hist-sub ellipsis' }, names.join(t('common.listSep')))),
@@ -136,11 +149,17 @@ function reserveList(root) {
   };
 
   return [
+    waiting.length ? h('section', { class: 'rsv-group' },
+      h('h2', { class: 'group-label' }, t('hist.waiting')),
+      h('div', { class: 'card list' }, waiting.map(rsvRow))) : null,
     // 不定期の最後は、項目を削除したあとに残った支払日前の支払い
     group('irregular', 'history', t('repeat.irregular'), [...items.map(rsvTitle), ...orphans.map(txLabel)],
       [...itemRows, ...orphans.map((tx) => plannedRow(tx, () => openPlannedMenu(tx)))]),
-    group('salary', 'briefcase', t('kind.salary'), salaries.map((r) => r.company), salaries.map(rsvRow), salaries.filter((r) => r.date <= today).length),
-    cancelRows.length || lendRows.length ? h('div', { class: 'card list top-pending' }, cancelRows, lendRows) : null,
+    group('salary', 'briefcase', t('kind.salary'), salaries.map((r) => r.company), salaries.map(rsvRow), dueCount(salaries)),
+    group('regIncome', 'repeat', t('hist.regIncome'), regIncomes.map(rsvTitle), regIncomes.map(rsvRow), dueCount(regIncomes), 'income'),
+    group('regExpense', 'repeat', t('hist.regExpense'), regExpenses.map(rsvTitle), regExpenses.map(rsvRow), 0, 'expense'),
+    group('uncollected', 'handout', t('hist.uncollected'), uncollected.map(txLabel), uncollected.map(lendRow), 0, 'lend'),
+    cancelRows.length || borrowRows.length ? h('div', { class: 'card list top-pending' }, cancelRows, borrowRows) : null,
     rsvRows.length ? h('div', { class: 'card list' }, rsvRows) : null,
   ];
 }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { evaluate, pressKey } from '../js/calc.js';
 import { isHoliday, shiftDate, todayKey, dayInMonth, holidaysOf } from '../js/dates.js';
 import { Store } from '../js/store.js';
-import { analyze, balances, bellItems, cardStatus, cycleOfDate, historyRows, itemPayments, orphanPlanned, payDateOf, startCycle, totalBalance, unpaidOf } from '../js/ledger.js';
+import { analyze, balances, bellItems, cardPlan, cardStatus, newCardPlan, cycleOfDate, historyRows, itemPayments, orphanPlanned, payDateOf, startCycle, totalBalance, unpaidOf } from '../js/ledger.js';
 
 const at = (s) => new Date(s).getTime();
 function setup(start = '2026-11-21T12:00:00') {
@@ -286,4 +286,40 @@ test('monthly on the last day', () => {
   assert.equal(r.date, '2026-11-30');
   st.advanceReservation(r.id);
   assert.equal(st.get('reservations', r.id).date, '2026-12-31');
+});
+
+test('card payments can be set per cycle', () => {
+  const { st, clock } = setup();
+  const cash = st.addAccount({ type: 'cash', name: '銀行', initial: 100000 });
+  const conf = { closingDay: 15, payDay: 10, payMonths: 1, debitId: cash.id, shift: 'none' };
+  const plan0 = newCardPlan(conf, st.today());
+  assert.deepEqual(plan0.map((p) => p.payDate), ['2026-12-10', '2027-01-10', '2027-02-10']);
+  const card = st.addAccount({ type: 'card', name: 'C', initial: 3000, card: conf, later: [{ cycle: plan0[1].cycle, amount: 2000 }, { cycle: plan0[2].cycle, amount: 0 }] });
+  const amounts = () => cardPlan(st.live, st.get('accounts', card.id), st.today()).map((p) => p.amount);
+  assert.equal(unpaidOf(balances(st.live), card.id), 5000);
+  assert.deepEqual(amounts(), [3000, 2000, 0]);
+  assert.equal(historyRows(st.live).length, 0);
+  st.saveTx({ type: 'expense', amount: 500, date: '2026-11-20', accountId: card.id });
+  assert.deepEqual(amounts(), [3000, 2500, 0]);
+  // 次の支払いだけ増やす・次の次だけ減らす
+  const p = cardPlan(st.live, card, st.today());
+  const a = st.adjustBalance(card.id, -1000, false, p[0].cycle);
+  st.adjustBalance(card.id, 300, false, p[1].cycle);
+  assert.deepEqual(amounts(), [4000, 2200, 0]);
+  assert.equal(unpaidOf(balances(st.live), card.id), 6200);
+  // 履歴に残す
+  assert.equal(historyRows(st.live).filter((r) => r.kind === 'adj').length, 0);
+  st.showAdjustments([a.id]);
+  assert.equal(historyRows(st.live).filter((r) => r.kind === 'adj').length, 1);
+  assert.equal(analyze(st.live, '2026-11').expense, 500);
+  // 次の支払いを払うと、次の次が次になる
+  clock.t = at('2026-12-10T12:00:00');
+  const s = cardStatus(st.live, card, st.today());
+  assert.deepEqual([s.payDate, s.amount, s.due], ['2026-12-10', 4000, true]);
+  st.payCard(card.id, s.cycle, s.amount, s.payDate);
+  assert.deepEqual(amounts(), [2200, 0, 0]);
+  // 払いすぎは次の回に回る
+  st.adjustBalance(card.id, 2700, false);
+  assert.deepEqual(amounts(), [0, 0, 0]);
+  assert.equal(cardPlan(st.live, card, st.today()).reduce((x, y) => x + y.raw, 0), -500);
 });
