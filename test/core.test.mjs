@@ -293,8 +293,8 @@ test('card payments can be set per cycle', () => {
   const cash = st.addAccount({ type: 'cash', name: '銀行', initial: 100000 });
   const conf = { closingDay: 15, payDay: 10, payMonths: 1, debitId: cash.id, shift: 'none' };
   const plan0 = newCardPlan(conf, st.today());
-  assert.deepEqual(plan0.map((p) => p.payDate), ['2026-12-10', '2027-01-10', '2027-02-10']);
-  const card = st.addAccount({ type: 'card', name: 'C', initial: 3000, card: conf, later: [{ cycle: plan0[1].cycle, amount: 2000 }, { cycle: plan0[2].cycle, amount: 0 }] });
+  assert.deepEqual(plan0.map((p) => p.payDate), ['2026-12-10', '2027-01-10']);
+  const card = st.addAccount({ type: 'card', name: 'C', initial: 3000, card: conf, later: [{ cycle: plan0[1].cycle, amount: 2000 }] });
   const amounts = () => cardPlan(st.live, st.get('accounts', card.id), st.today()).map((p) => p.amount);
   assert.equal(unpaidOf(balances(st.live), card.id), 5000);
   assert.deepEqual(amounts(), [3000, 2000, 0]);
@@ -317,9 +317,31 @@ test('card payments can be set per cycle', () => {
   const s = cardStatus(st.live, card, st.today());
   assert.deepEqual([s.payDate, s.amount, s.due], ['2026-12-10', 4000, true]);
   st.payCard(card.id, s.cycle, s.amount, s.payDate);
-  assert.deepEqual(amounts(), [2200, 0, 0]);
+  assert.deepEqual(amounts(), [2200, 0]);
   // 払いすぎは次の回に回る
   st.adjustBalance(card.id, 2700, false);
-  assert.deepEqual(amounts(), [0, 0, 0]);
+  assert.deepEqual(amounts(), [0, 0]);
   assert.equal(cardPlan(st.live, card, st.today()).reduce((x, y) => x + y.raw, 0), -500);
+});
+
+test('the number of payments follows closing and payment days', () => {
+  const n = (today, card) => newCardPlan({ payMonths: 1, shift: 'none', ...card }, today).map((p) => p.payDate.slice(5));
+  assert.deepEqual(n('2026-11-12', { closingDay: 15, payDay: 10 }), ['12-10']); // 締め日の前
+  assert.deepEqual(n('2026-11-26', { closingDay: 15, payDay: 10 }), ['12-10', '01-10']);
+  assert.deepEqual(n('2026-11-26', { closingDay: 15, payDay: 27 }), ['11-27', '12-27', '01-27']); // 締め日と支払日の間
+  assert.deepEqual(n('2026-11-28', { closingDay: 15, payDay: 27 }), ['12-27', '01-27']);
+  assert.deepEqual(n('2026-11-26', { closingDay: 'end', payDay: 27 }), ['11-27', '12-27']);
+  assert.deepEqual(n('2026-11-28', { closingDay: 'end', payDay: 27 }), ['12-27']);
+  assert.deepEqual(n('2026-11-26', { closingDay: 15, payDay: 10, payMonths: 2 }), ['12-10', '01-10', '02-10']);
+  // 設定画面: 払っていない回と、それより後の分
+  const { st, clock } = setup('2026-11-26T12:00:00');
+  const cash = st.addAccount({ type: 'cash', name: 'B', initial: 0 });
+  const card = st.addAccount({ type: 'card', name: 'C', initial: 100, card: { closingDay: 15, payDay: 27, payMonths: 1, debitId: cash.id, shift: 'none' }, later: [{ cycle: '2026-11', amount: 200 }, { cycle: '2026-12', amount: 300 }] });
+  const plan = () => cardPlan(st.live, st.get('accounts', card.id), st.today()).map((p) => [p.payDate.slice(5), p.amount, p.rest]);
+  assert.deepEqual(plan(), [['11-27', 100, false], ['12-27', 200, false], ['01-27', 300, false], ['02-27', 0, true]]);
+  st.saveTx({ type: 'expense', amount: 50, date: '2027-01-20', accountId: card.id });
+  assert.deepEqual(plan()[3], ['02-27', 50, true]);
+  clock.t = at('2026-11-27T12:00:00');
+  st.payCard(card.id, '2026-10', 100, '2026-11-27');
+  assert.deepEqual(plan(), [['12-27', 200, false], ['01-27', 300, false], ['02-27', 50, true]]);
 });

@@ -144,7 +144,7 @@ export class Store {
 
   // ---- 口座（ACC） ----
 
-  // later は、カードの次の次・その後の支払い [{ cycle, amount }]
+  // later は、カードの2回目からの支払い [{ cycle, amount }]
   addAccount({ type, name, memo = '', icon, initial = 0, card = null, later = [] }) {
     const order = Math.max(-1, ...this.state.accounts.map((a) => a.order)) + 1;
     const row = {

@@ -48,83 +48,54 @@ export function openAccountForm(account = null) {
     memo: account?.memo ?? '',
     icon: account?.icon ?? null,
     amount: editing ? current : null,
-    pay: [null, null, null], // カードの次・次の次・その後の支払い
-    payBase: [0, 0, 0], // 合計を入れている間の、元の内訳
+    pay: [], // カードのこれからの支払い（次の支払いから順に）
     payTouched: false,
-    card: { closingDay: 15, payDay: 10, payMonths: 1, debitId: null, shift: 'next', ...(account?.card ?? {}) },
+    card: { closingDay: null, payDay: null, payMonths: 1, debitId: null, shift: 'next', ...(account?.card ?? {}) },
   };
   const root = h('div', { class: 'form' });
   let saveBtn;
   const debits = () => store.state.accounts.filter((a) => !a.deleted && a.type !== 'card');
+  // 締め日と支払日が決まっているか
+  const hasDays = () => st.card.closingDay != null && st.card.payDay != null;
   const valid = () => {
     if (!st.name.trim()) return false;
+    if (st.type === 'card' && !hasDays()) return false;
     if (!editing && (st.type === 'card' ? st.pay[0] : st.amount) == null) return false;
     if (st.type === 'card' && !store.get('accounts', st.card.debitId)) return false;
     return true;
   };
   const check = () => { if (saveBtn) saveBtn.disabled = !valid(); };
   const defIcon = () => ({ kind: 'emoji', value: st.type === 'card' ? '💳' : st.type === 'saving' ? '🐷' : '👛' });
-  const paySum = () => st.pay.reduce((s, v) => s + (v ?? 0), 0);
   const plan = () => (editing ? cardPlan(store.live, { ...account, card: { ...account.card, ...st.card } }, store.today()) : newCardPlan(st.card, store.today()));
-  const payLabel = (i, p) => (i === 2 ? t('card.pay2') : t('card.payDateOf', { label: t(`card.pay${i}`), date: fmtDate(p.payDate, { week: false }) }));
-  // カードの支払いの金額。設定画面では合計（今の未払い額）からも直せて、差は次の支払いから順に動かす
+  const payLabel = (i, p) => {
+    if (p.rest) return t('card.payRest');
+    return t('card.payDateOf', { label: i < 2 ? t(`card.pay${i}`) : t('card.payN', { n: i + 1 }), date: fmtDate(p.payDate, { week: false }) });
+  };
+  // カードのこれからの支払いの金額。締め日と支払日が決まると、まだ払っていない回の数だけ欄を出す
   const payFields = () => {
+    if (!hasDays()) return h('p', { class: 'muted small hint-line' }, icon('calendar', { size: 16 }), t('card.payHint'));
     const parts = plan();
-    if (editing && !st.payTouched) {
-      st.pay = parts.map((p) => p.amount);
-      st.payBase = [...st.pay];
-    }
-    let total = null;
-    const sumLine = h('p', { class: 'muted small pay-sum' });
-    const showSum = () => {
-      if (total) total.setValue(paySum());
-      else sumLine.textContent = t('card.paySum', { amt: yen(paySum()) });
-    };
-    const inputs = parts.map((p, i) => amountInput({
-      value: st.pay[i],
+    if (editing && !st.payTouched) st.pay = parts.map((p) => p.amount);
+    // 未払い額の合計は、欄の合計（入力はできない）
+    const total = h('p', { class: 'muted small pay-sum' });
+    const showTotal = () => { total.textContent = t('card.paySum', { amt: yen(parts.reduce((s, p, i) => s + (st.pay[i] ?? 0), 0)) }); };
+    showTotal();
+    return [parts.map((p, i) => (p.rest && !st.pay[i] ? null : field(payLabel(i, p), amountInput({
+      value: st.pay[i] ?? null,
       label: payLabel(i, p),
       onChange: (v) => {
-        if (v === st.pay[i]) return;
+        if (v === (st.pay[i] ?? null)) return;
         st.pay[i] = v;
-        st.payBase = st.pay.map((x) => x ?? 0);
         st.payTouched = true;
-        showSum();
+        showTotal();
         check();
       },
-    }));
-    if (editing) {
-      total = amountInput({
-        value: paySum(),
-        label: t('acc.currentUnpaid'),
-        onChange: (v) => {
-          if (v == null ? total.classList.contains('editing') : v === paySum()) return;
-          if (v == null) {
-            // 空のまま閉じたら元に戻す
-            total.setValue(paySum());
-            return;
-          }
-          const next = [...st.payBase];
-          next[0] += Math.max(0, v) - next.reduce((s, n) => s + n, 0);
-          for (const i of [0, 1]) {
-            if (next[i] < 0) {
-              next[i + 1] += next[i];
-              next[i] = 0;
-            }
-          }
-          st.pay = next;
-          st.payTouched = true;
-          inputs.forEach((el, i) => el.setValue(next[i]));
-        },
-      });
-    } else {
-      showSum();
-    }
-    return [
-      editing ? field(t('acc.currentUnpaid'), total) : null,
-      // 3回目以降は、翌々月払いのときか、すでにあるときだけ出す
-      inputs.map((el, i) => (i < 2 || st.card.payMonths === 2 || st.pay[2] ? field(payLabel(i, parts[i]), el) : null)),
-      editing ? null : sumLine,
-    ];
+    })))), total];
+  };
+  // 締め日・支払日などを変えると回の分かれ方が変わるので、設定画面では金額を計算し直す
+  const redrawPay = () => {
+    if (editing) st.payTouched = false;
+    draw();
   };
   const draw = () => {
     const ic = st.icon ?? defIcon();
@@ -162,10 +133,10 @@ export function openAccountForm(account = null) {
       const c = st.card;
       if (!debits().length) parts.push(h('p', { class: 'error' }, t('card.noDebit')));
       parts.push(h('div', { class: 'grid2' },
-        field(t('card.closing'), daySelect(c.closingDay, (v) => { c.closingDay = v; draw(); })),
-        field(t('card.payDay'), daySelect(c.payDay, (v) => { c.payDay = v; draw(); }))));
-      parts.push(field(t('card.payMonths'), seg([[1, t('card.next1')], [2, t('card.next2')]], c.payMonths, (v) => { c.payMonths = v; draw(); }, 'wide small')));
-      parts.push(field(t('field.holiday'), shiftSeg(c.shift, (v) => { c.shift = v; draw(); })));
+        field(t('card.closing'), daySelect(c.closingDay, (v) => { c.closingDay = v; redrawPay(); })),
+        field(t('card.payDay'), daySelect(c.payDay, (v) => { c.payDay = v; redrawPay(); }))));
+      parts.push(field(t('card.payMonths'), seg([[1, t('card.next1')], [2, t('card.next2')]], c.payMonths, (v) => { c.payMonths = v; redrawPay(); }, 'wide small')));
+      parts.push(field(t('field.holiday'), shiftSeg(c.shift, (v) => { c.shift = v; redrawPay(); })));
       parts.push(field(t('card.debit'), accountPicker({ types: ['cash', 'saving'], value: c.debitId, onChange: (id) => { c.debitId = id; draw(); } })));
       // 支払日が決まってから金額を入れる
       parts.push(payFields());
@@ -188,7 +159,7 @@ export function openAccountForm(account = null) {
       const adjs = [];
       if (card) {
         const parts = cardPlan(store.live, store.get('accounts', account.id), store.today());
-        const want = st.pay.map((v) => Math.max(0, v ?? 0));
+        const want = parts.map((p, i) => (st.pay[i] === undefined ? p.amount : Math.max(0, st.pay[i] ?? 0)));
         if (st.payTouched && parts.some((p, i) => p.amount !== want[i])) {
           parts.forEach((p, i) => {
             if (p.amount !== want[i]) lines.push(`${payLabel(i, p)} ${yen(p.amount)} → ${yen(want[i])}`);

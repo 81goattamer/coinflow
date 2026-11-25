@@ -293,7 +293,8 @@ function repeatControl(st, redraw, check) {
 
 export function daySelect(value, onChange, last = 28) {
   const opts = [...Array.from({ length: last }, (_, i) => i + 1), 'end'];
-  return h('select', { class: 'input', onChange: (e) => onChange(e.target.value === 'end' ? 'end' : Number(e.target.value)) },
+  return h('select', { class: 'input', onChange: (e) => e.target.value && onChange(e.target.value === 'end' ? 'end' : Number(e.target.value)) },
+    value == null ? h('option', { value: '', selected: true, disabled: true }, t('common.choose')) : null,
     opts.map((d) => h('option', { value: String(d), selected: String(d) === String(value) }, fmtDay(d))));
 }
 

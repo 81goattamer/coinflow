@@ -150,38 +150,49 @@ export function cardStatus(state, account, today, bal = balances(state)) {
   return { unpaid, cycle: null, payDate: null, amount: 0, due: false };
 }
 
-// 次・次の次・その後の支払い（ACC-13・ACC-22）。その後は3回目以降をまとめたもの。
-// amount は払う額（0 以上）、raw はその回に入っている額（払いすぎなどで負にもなる。3つの合計が未払い額）
+// これからの支払い（ACC-13・ACC-22）。次の回から、今日使った分が入る回まで。最後の rest はそれより後の分
+// amount は払う額（0 以上）、raw はその回に入っている額（払いすぎなどで負にもなる。合計が未払い額）
 export function cardPlan(state, account, today) {
+  const card = account.card;
   const st = cardStatus(state, account, today);
   const paid = paidCycles(state, account.id);
   const after = afterOf(state, account);
+  const cycles = [st.cycle ?? cycleOfDate(card, today)];
+  const last = cycleOfDate(card, today);
   const nextOf = (c) => {
     let n = addMonths(c, 1);
     while (paid.has(n)) n = addMonths(n, 1);
     return n;
   };
-  const c1 = st.cycle ?? cycleOfDate(account.card, today);
-  const c2 = nextOf(c1);
-  const c3 = nextOf(c2);
-  const raw = [st.unpaid - after(c1), after(c1) - after(c2), after(c2)];
+  for (let n = nextOf(cycles[0]); n <= last; n = nextOf(n)) cycles.push(n);
+  let left = st.unpaid;
   let sum = 0;
   let paidSum = 0;
-  return [c1, c2, c3].map((cycle, i) => {
-    sum += raw[i];
+  const part = (cycle, raw, rest) => {
+    sum += raw;
     const amount = Math.max(0, sum - paidSum);
     paidSum += amount;
-    return { cycle, payDate: payDateOf(account.card, cycle), raw: raw[i], amount };
+    return { cycle, payDate: payDateOf(card, cycle), raw, amount, rest };
+  };
+  const parts = cycles.map((c) => {
+    const later = after(c);
+    const p = part(c, left - later, false);
+    left = later;
+    return p;
   });
+  return [...parts, part(nextOf(cycles.at(-1)), left, true)];
 }
 
-// これから登録するカードの、次・次の次・その後の支払い回
+// これから登録するカードの、金額を入れる支払い回（今日までに使った分が入る回）
 export function newCardPlan(card, today) {
-  const c1 = startCycle({ ...card, startDate: today });
-  return [0, 1, 2].map((i) => {
-    const cycle = addMonths(c1, i);
-    return { cycle, payDate: payDateOf(card, cycle), raw: 0, amount: 0 };
-  });
+  const last = cycleOfDate(card, today);
+  const out = [];
+  let c = startCycle({ ...card, startDate: today });
+  do {
+    out.push({ cycle: c, payDate: payDateOf(card, c), raw: 0, amount: 0, rest: false });
+    c = addMonths(c, 1);
+  } while (c <= last);
+  return out;
 }
 
 // 支払日が来たカード（CARD-01）
