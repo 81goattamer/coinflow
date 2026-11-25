@@ -11,6 +11,7 @@ import { actionMenu, confirmDialog, empty, h, icon, iconButton, seg, setChildren
 
 let mode = 'history';
 const filters = new Set(['expense', 'income', 'transfer']);
+const openGroups = new Set(); // 開いている見出し（不定期・給与）
 
 export function setHistoryMode(m) {
   mode = m;
@@ -20,7 +21,7 @@ export function renderHistory(root) {
   setChildren(root,
     h('header', { class: 'page-head' },
       seg([['history', t('hist.history')], ['reserve', t('hist.reserve')]], mode, (v) => { mode = v; renderHistory(root); }, 'wide top-seg')),
-    mode === 'history' ? historyList(root) : reserveList());
+    mode === 'history' ? historyList(root) : reserveList(root));
 }
 
 function historyList(root) {
@@ -50,8 +51,8 @@ function historyList(root) {
   })];
 }
 
-// 予約（HIST-20〜25）: 不定期の項目 → キャンセル予約 → 貸与・借入 → 日付順の予約
-function reserveList() {
+// 予約（HIST-20〜25）: 不定期・給与（押すと一覧が開く） → キャンセル予約 → 貸与・借入 → 日付順の予約
+function reserveList(root) {
   const today = store.today();
   const cancels = pendingCancels(store.live);
   const lends = pendingLends(store.live);
@@ -93,7 +94,7 @@ function reserveList() {
       icon('chevron', { size: 18 }));
   });
 
-  const rsvRows = rsvs.map((r) => {
+  const rsvRow = (r) => {
     const due = r.date <= today;
     return h('div', { class: `rsv-row ${due ? 'due' : ''}` },
       h('span', { class: `kind-icon k-${r.type}` }, icon(r.type === 'salary' ? 'briefcase' : r.type === 'income' ? 'in' : 'out', { size: 18 })),
@@ -110,12 +111,35 @@ function reserveList() {
           if (await confirmDialog({ message: t('hist.rsvDeleteAsk'), okLabel: t('common.delete'), danger: true })) store.deleteReservation(r.id);
         } },
       ]), 'row-more'));
-  });
+  };
+  const salaries = rsvs.filter((r) => r.type === 'salary');
+  const rsvRows = rsvs.filter((r) => r.type !== 'salary').map(rsvRow);
+
+  // 見出しを押すと、その一覧が開く。日付が来たものがあれば件数を赤丸で出す
+  const group = (id, ic, label, names, rows, due = 0) => {
+    if (!rows.length) return null;
+    const open = openGroups.has(id);
+    return h('div', { class: 'card list rsv-group' },
+      h('button', { type: 'button', class: 'rsv-row rsv-group-head', 'aria-expanded': open ? 'true' : 'false', onClick: () => {
+        if (open) openGroups.delete(id);
+        else openGroups.add(id);
+        renderHistory(root);
+      } },
+      h('span', { class: `kind-icon k-${id}` }, icon(ic, { size: 18 })),
+      h('span', { class: 'grow hist-main' },
+        h('span', { class: 'hist-title ellipsis' }, label),
+        open ? null : h('span', { class: 'hist-sub ellipsis' }, names.join(t('common.listSep')))),
+      due ? h('span', { class: 'due-badge' }, due) : null,
+      h('span', { class: 'muted' }, rows.length),
+      icon(open ? 'up' : 'down', { size: 20 })),
+      open ? rows : null);
+  };
 
   return [
-    itemRows.length ? h('div', { class: 'card list top-pending' }, itemRows) : null,
-    // 項目を削除したあとに残った、支払日前の支払い
-    orphans.length ? h('div', { class: 'card list top-pending' }, orphans.map((tx) => plannedRow(tx, () => openPlannedMenu(tx)))) : null,
+    // 不定期の最後は、項目を削除したあとに残った支払日前の支払い
+    group('irregular', 'history', t('repeat.irregular'), [...items.map(rsvTitle), ...orphans.map(txLabel)],
+      [...itemRows, ...orphans.map((tx) => plannedRow(tx, () => openPlannedMenu(tx)))]),
+    group('salary', 'briefcase', t('kind.salary'), salaries.map((r) => r.company), salaries.map(rsvRow), salaries.filter((r) => r.date <= today).length),
     cancelRows.length || lendRows.length ? h('div', { class: 'card list top-pending' }, cancelRows, lendRows) : null,
     rsvRows.length ? h('div', { class: 'card list' }, rsvRows) : null,
   ];

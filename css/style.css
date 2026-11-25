@@ -508,3 +508,9 @@ select.input { appearance: auto; }
 .date-only .input { width: auto; padding: 8px; font-size: 15px; }
 .item-row > .icon { color: var(--muted); }
 .week-seg button { padding: 5px 0; }
+
+/* 予約の見出し（不定期・給与） */
+.rsv-group { margin-bottom: 12px; }
+.rsv-group-head > .icon { color: var(--muted); }
+.rsv-group-head[aria-expanded="true"] { background: var(--fill); }
+.due-badge { min-width: 20px; height: 20px; border-radius: 10px; padding: 0 6px; background: #e0201b; color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; }
