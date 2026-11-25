@@ -34,6 +34,11 @@ export function catLabel(catId, subId) {
   return `${c.name} › ${s ? s.name : t('common.uncategorized')}`;
 }
 
+// 記録の見出し。名前を付けていればその名前、なければカテゴリ
+export function txLabel(tx) {
+  return tx.name || catLabel(tx.catId, tx.subId);
+}
+
 export const TYPE_ICON = { cash: 'wallet', card: 'card', saving: 'piggy' };
 export const KIND_ICON = { expense: 'out', income: 'in', transfer: 'transfer', salary: 'briefcase', cancel: 'xcircle', lend: 'handout', borrow: 'handin', cardpay: 'card', adj: 'scale', refund: 'undo', points: 'gift' };
 
@@ -121,7 +126,7 @@ export function dateTimeFields(st, onChange) {
 // ---- 記録のフォーム ----
 
 export function newTxDraft(type = 'expense') {
-  return { type, amount: null, accountId: null, toAccountId: null, borrowName: '', borrowOn: false, shop: '', pointsOn: false, points: null, catId: null, subId: null, date: store.today(), withTime: true, time: nowTime(), lends: [], id: null, reservationId: null };
+  return { type, amount: null, accountId: null, toAccountId: null, borrowName: '', borrowOn: false, name: '', shop: '', pointsOn: false, points: null, catId: null, subId: null, date: store.today(), withTime: true, time: nowTime(), lends: [], id: null, reservationId: null };
 }
 
 export function draftFromTx(tx) {
@@ -133,6 +138,7 @@ export function draftFromTx(tx) {
     toAccountId: tx.toAccountId,
     borrowName: tx.type === 'expense' ? (tx.borrow?.name ?? '') : '',
     borrowOn: tx.type === 'income' && !!tx.borrow,
+    name: tx.name ?? '',
     // 収入の借入では、お店の欄に借りた人を入れる
     shop: tx.type === 'income' && tx.borrow ? tx.borrow.name : (tx.shop ?? ''),
     pointsOn: tx.type === 'expense' && (tx.points ?? 0) > 0,

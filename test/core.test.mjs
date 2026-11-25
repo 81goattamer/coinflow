@@ -187,6 +187,18 @@ test('backup round trip', () => {
   assert.throws(() => st2.parseBackup(JSON.stringify({ app: 'CoinFlow', schemaVersion: 9, data: {} })), /newer/);
 });
 
+test('name is optional and kept for expense and income only', () => {
+  const { st } = setup();
+  const { cash, save } = bank(st);
+  const a = st.saveTx({ type: 'expense', amount: 500, date: '2026-11-22', accountId: cash.id, name: ' ランチ ' });
+  assert.equal(a.name, 'ランチ');
+  assert.equal(st.saveTx({ type: 'income', amount: 500, date: '2026-11-22', accountId: cash.id, name: 'お祝い' }).name, 'お祝い');
+  assert.equal(st.saveTx({ type: 'income', amount: 500, date: '2026-11-22', accountId: cash.id }).name, '');
+  assert.equal(st.saveTx({ type: 'transfer', amount: 500, date: '2026-11-22', accountId: cash.id, toAccountId: save.id, name: 'x' }).name, '');
+  // 編集で名前を消せる
+  assert.equal(st.saveTx({ ...a, name: '' }).name, '');
+});
+
 test('shop is kept for expense and income only', () => {
   const { st } = setup();
   const { cash, save } = bank(st);

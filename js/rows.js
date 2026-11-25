@@ -1,7 +1,7 @@
 // 履歴の1行（HIST-10、LEND-05、CXL-04）。履歴タブと口座の明細で使う
 import { store } from './app-store.js';
 import { t, yen } from './i18n.js';
-import { KIND_ICON, accName, catLabel } from './forms.js';
+import { KIND_ICON, accName, catLabel, txLabel } from './forms.js';
 import { rowAmountFor } from './ledger.js';
 import { h, icon } from './ui.js';
 
@@ -28,14 +28,15 @@ export function statusLines(tx) {
 function txTitle(tx) {
   if (tx.type === 'transfer') return t('kind.transfer');
   if (tx.type === 'cardpay') return t('kind.cardpay');
-  return catLabel(tx.catId, tx.subId);
+  return txLabel(tx);
 }
 
 function txSub(tx) {
   if (tx.type === 'transfer') return `${accName(tx.accountId)} → ${accName(tx.toAccountId)}`;
   if (tx.type === 'cardpay') return `${accName(tx.accountId)} → ${accName(tx.cardId)}`;
   const acc = tx.type === 'expense' && !tx.accountId ? t('kind.borrow') : accName(tx.accountId);
-  return tx.shop ? `${tx.shop} · ${acc}` : acc;
+  // 名前を付けた記録は、見出しが名前になるのでカテゴリをこちらに出す
+  return [tx.name ? catLabel(tx.catId, tx.subId) : '', tx.shop, acc].filter(Boolean).join(' · ');
 }
 
 // accountId を渡すと、その口座から見た増減で金額を出す

@@ -1,7 +1,7 @@
 // 履歴タブ（HIST）。上の切り替えで「履歴」と「予約」
 import { store } from '../app-store.js';
 import { fmtDate, t, yen } from '../i18n.js';
-import { accName, catLabel } from '../forms.js';
+import { accName, txLabel } from '../forms.js';
 import { historyRows, pendingCancels, pendingLends, openParties } from '../ledger.js';
 import { rowView } from '../rows.js';
 import {
@@ -61,7 +61,7 @@ function reserveList() {
   const cancelRows = cancels.map((tx) => h('div', { class: 'rsv-row' },
     h('span', { class: 'kind-icon k-cancel' }, icon('xcircle', { size: 18 })),
     h('span', { class: 'grow hist-main' },
-      h('span', { class: 'hist-title ellipsis' }, catLabel(tx.catId, tx.subId)),
+      h('span', { class: 'hist-title ellipsis' }, txLabel(tx)),
       h('span', { class: 'hist-sub ellipsis' }, `${fmtDate(tx.date, { year: false })} · ${accName(tx.accountId)} · ${yen(tx.amount)}`),
       h('span', { class: 'rsv-actions' },
         h('button', { type: 'button', class: 'mini-btn primary', onClick: () => openCancelSheet(tx.id) }, t('cxl.confirm')),
@@ -73,7 +73,7 @@ function reserveList() {
     return h('button', { type: 'button', class: 'rsv-row', onClick: () => openPartySheet(tx.id) },
       h('span', { class: `kind-icon k-${role}` }, icon(role === 'lend' ? 'handout' : 'handin', { size: 18 })),
       h('span', { class: 'grow hist-main' },
-        h('span', { class: 'hist-title ellipsis' }, tx.type === 'income' ? t('kind.borrow') : catLabel(tx.catId, tx.subId)),
+        h('span', { class: 'hist-title ellipsis' }, tx.type === 'income' ? tx.name || t('kind.borrow') : txLabel(tx)),
         h('span', { class: 'hist-sub ellipsis' }, `${fmtDate(tx.date, { year: false })} · ${yen(tx.amount)}`),
         h('span', { class: 'party-dots' }, parties.map((p) => h('span', { class: `party-dot ${p.done ? 'done' : ''}` }, p.done ? icon('check', { size: 12 }) : null, p.name)))),
       icon('chevron', { size: 18 }));

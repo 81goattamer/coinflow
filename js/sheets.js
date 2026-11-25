@@ -3,7 +3,7 @@ import { store } from './app-store.js';
 import { fmtDate, t, yen } from './i18n.js';
 import { amountInput, closeKeypad } from './keypad.js';
 import {
-  TYPE_ICON, accIcon, accName, accountPicker, catLabel, daySelect, draftFromRsv, draftFromTx, newTxDraft, repeatLabel, rsvForm, shiftSeg,
+  TYPE_ICON, accIcon, accName, accountPicker, catLabel, daySelect, draftFromRsv, draftFromTx, newTxDraft, repeatLabel, rsvForm, shiftSeg, txLabel,
 } from './forms.js';
 import { openCategoryChooser, txDetail } from './tx-detail.js';
 import { balances, bellItems, cardStatus, historyRows, openParties, rowTouches, unpaidCycles, unpaidOf } from './ledger.js';
@@ -440,7 +440,7 @@ export function openBell() {
           h('span', { class: 'hist-amount' }, r.amount != null ? yen(r.amount) : '—')))),
         group(t('bell.cancels'), b.cancels.map((tx) => h('button', { type: 'button', class: 'hist-row', onClick: () => openCancelSheet(tx.id) },
           h('span', { class: 'kind-icon k-cancel' }, icon('xcircle', { size: 18 })),
-          h('span', { class: 'grow hist-main' }, h('span', { class: 'hist-title ellipsis' }, catLabel(tx.catId, tx.subId)), h('span', { class: 'hist-sub' }, `${fmtDate(tx.date)} · ${accName(tx.accountId)}`)),
+          h('span', { class: 'grow hist-main' }, h('span', { class: 'hist-title ellipsis' }, txLabel(tx)), h('span', { class: 'hist-sub' }, `${fmtDate(tx.date)} · ${accName(tx.accountId)}`)),
           h('span', { class: 'hist-amount' }, yen(tx.amount))))));
     },
   });

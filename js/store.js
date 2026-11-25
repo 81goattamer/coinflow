@@ -214,6 +214,8 @@ export class Store {
       cycle: strOrNull(input.cycle ?? old?.cycle),
       catId: type === 'expense' || type === 'income' ? strOrNull(input.catId) : null,
       subId: type === 'expense' || type === 'income' ? strOrNull(input.subId) : null,
+      // 任意の名前（支出・収入だけ）
+      name: type === 'expense' || type === 'income' ? str(input.name).trim() : '',
       shop: type === 'expense' || type === 'income' ? str(input.shop).trim() : '',
       // ポイント利用（支出だけ）。金額を超えない
       points: type === 'expense' ? Math.min(pos(input.points ?? 0) || 0, pos(input.amount)) : 0,

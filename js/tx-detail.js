@@ -137,6 +137,7 @@ export function txDetail(st, { title, onBack, onDone, onCategory, editing = fals
       toAccountId: st.toAccountId,
       catId: st.catId,
       subId: st.subId,
+      name: st.name,
       shop: isInc && st.borrowOn ? '' : st.shop,
       points: isExp && st.pointsOn ? st.points ?? 0 : 0,
       borrowName,
@@ -181,6 +182,10 @@ export function txDetail(st, { title, onBack, onDone, onCategory, editing = fals
       })));
     }
     if (isExp || isInc) {
+      parts.push(row(icon('tag', { size: 22 }), h('input', {
+        class: 'dinput name-input', value: st.name, maxlength: 40, placeholder: t('field.txName'), 'aria-label': t('field.txName'),
+        onInput: (e) => { st.name = e.target.value; },
+      })));
       const salary = isInc && store.isSalaryCategory(st.catId);
       const [ic, ph] = isInc && st.borrowOn ? ['user', t('field.lender')] : salary ? ['building', t('field.companyShort')] : ['store', t('field.shop')];
       parts.push(row(icon(ic, { size: 22 }), h('input', {
