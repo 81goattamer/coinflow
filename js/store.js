@@ -1,6 +1,6 @@
 // データの層。メモリ上の state を変え、変わった行だけ保存先に書く。DOM に依存しないので Node でもテストできる
 import { isDateKey, nowTime, todayKey } from './dates.js';
-import { firstRepeatDate, firstSalaryMonth, nextReservation, salaryDate } from './ledger.js';
+import { firstRepeatDate, firstSalaryMonth, isIrregular, liveState, nextReservation, salaryDate } from './ledger.js';
 
 export const APP_NAME = 'CoinFlow';
 export const SCHEMA_VERSION = 1;
@@ -106,6 +106,11 @@ export class Store {
 
   today() {
     return todayKey(this.now());
+  }
+
+  // 計算・履歴に使う state（支払日前の不定期の支払いを除く）
+  get live() {
+    return liveState(this.state, this.today());
   }
 
   get(table, id) {
@@ -223,6 +228,8 @@ export class Store {
       lends: [],
       cancel: old?.cancel ?? null,
       reservationId: input.reservationId ?? old?.reservationId ?? null,
+      // 不定期の予約から登録した支払いなら、その項目の id
+      itemId: strOrNull(input.itemId ?? old?.itemId),
       createdAt: old?.createdAt ?? this.iso(),
       updatedAt: this.iso(),
     };
@@ -308,13 +315,15 @@ export class Store {
   saveReservation(input) {
     const old = input.id ? this.get('reservations', input.id) : null;
     const today = this.today();
+    const irregular = input.type !== 'salary' && isIrregular(input);
     const row = {
       id: old?.id ?? uid(),
       type: input.type,
       accountId: strOrNull(input.accountId),
       catId: strOrNull(input.catId),
       subId: strOrNull(input.subId),
-      amount: input.type === 'salary' || input.amount == null || input.amount === '' ? null : pos(input.amount),
+      name: input.type === 'salary' ? '' : str(input.name).trim(),
+      amount: input.type === 'salary' || irregular || input.amount == null || input.amount === '' ? null : pos(input.amount),
       repeat: input.type === 'salary' ? { kind: 'monthly' } : (input.repeat ?? { kind: 'none' }),
       company: input.type === 'salary' ? str(input.company).trim() : '',
       payDay: input.type === 'salary' ? input.payDay : null,
@@ -329,10 +338,19 @@ export class Store {
       row.subId = null;
       row.month = old && old.payDay === row.payDay && old.shift === row.shift ? old.month : firstSalaryMonth(row, today);
       row.date = salaryDate(row, row.month);
+    } else if (irregular) {
+      // 不定期は日付を持たない
+      row.date = null;
     } else if (!isDateKey(input.date)) {
       row.date = firstRepeatDate(row.repeat, today);
     }
     return this.done(this.put('reservations', row));
+  }
+
+  // 不定期の項目の支払いで口座を変えたら、次回からその口座を初めに選んでおく
+  setItemAccount(id, accountId) {
+    const r = this.get('reservations', id);
+    if (r && accountId && r.accountId !== accountId) this.done(this.put('reservations', { ...r, accountId, updatedAt: this.iso() }));
   }
 
   deleteReservation(id) {

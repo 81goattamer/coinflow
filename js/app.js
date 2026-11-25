@@ -40,7 +40,7 @@ function goTab(id) {
 }
 
 function renderNav() {
-  const count = bellItems(store.state, store.today()).count;
+  const count = bellItems(store.live, store.today()).count;
   navEl.replaceChildren(...TABS.map((tab) => h('button', {
     type: 'button',
     class: `tab ${tab.id === current ? 'on' : ''}`,
@@ -91,7 +91,7 @@ function askPayments() {
   if (payQueueRunning) return;
   const later = new Set();
   const next = () => {
-    const due = dueCardPayments(store.state, store.today()).find((x) => !later.has(x.account.id));
+    const due = dueCardPayments(store.live, store.today()).find((x) => !later.has(x.account.id));
     if (!due) {
       payQueueRunning = false;
       return;

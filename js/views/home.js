@@ -11,7 +11,7 @@ function isStandalone() {
 }
 
 export function renderHome(root) {
-  const state = store.state;
+  const state = store.live;
   const today = store.today();
   const bal = balances(state);
   const bell = bellItems(state, today);

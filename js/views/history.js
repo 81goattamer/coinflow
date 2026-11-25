@@ -2,10 +2,10 @@
 import { store } from '../app-store.js';
 import { fmtDate, t, yen } from '../i18n.js';
 import { accName, txLabel } from '../forms.js';
-import { historyRows, pendingCancels, pendingLends, openParties } from '../ledger.js';
+import { historyRows, isIrregular, itemPayments, openParties, orphanPlanned, pendingCancels, pendingLends } from '../ledger.js';
 import { rowView } from '../rows.js';
 import {
-  openCancelSheet, openPartySheet, openRegisterSheet, openRowMenu, openRsvEdit, rsvSub, rsvTitle, withdrawCancel,
+  openCancelSheet, openItem, openPartySheet, openPlannedMenu, openRegisterSheet, openRowMenu, openRsvEdit, plannedRow, rsvSub, rsvTitle, withdrawCancel,
 } from '../sheets.js';
 import { actionMenu, confirmDialog, empty, h, icon, iconButton, seg, setChildren, toast } from '../ui.js';
 
@@ -34,7 +34,7 @@ function historyList(root) {
       renderHistory(root);
     },
   }, filters.has(k) ? icon('check', { size: 14 }) : null, t(`kind.${k}`))));
-  const rows = historyRows(store.state).filter((r) => r.filter === null || filters.has(r.filter));
+  const rows = historyRows(store.live).filter((r) => r.filter === null || filters.has(r.filter));
   if (!rows.length) return [chips, empty(t('hist.empty'), 'history')];
   // 日ごとにまとめる
   const days = [];
@@ -50,13 +50,27 @@ function historyList(root) {
   })];
 }
 
-// 予約（HIST-20〜25）: キャンセル予約 → 貸与・借入 → 日付順の予約
+// 予約（HIST-20〜25）: 不定期の項目 → キャンセル予約 → 貸与・借入 → 日付順の予約
 function reserveList() {
   const today = store.today();
-  const cancels = pendingCancels(store.state);
-  const lends = pendingLends(store.state);
-  const rsvs = [...store.state.reservations].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  if (!cancels.length && !lends.length && !rsvs.length) return empty(t('hist.rsvEmpty'), 'calendar');
+  const cancels = pendingCancels(store.live);
+  const lends = pendingLends(store.live);
+  const items = store.state.reservations.filter(isIrregular).sort((a, b) => ((a.createdAt ?? '') < (b.createdAt ?? '') ? -1 : 1));
+  const orphans = orphanPlanned(store.state, today);
+  const rsvs = store.state.reservations.filter((r) => !isIrregular(r)).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  if (!items.length && !orphans.length && !cancels.length && !lends.length && !rsvs.length) return empty(t('hist.rsvEmpty'), 'calendar');
+
+  // 不定期の項目。押すと専用のページを開く
+  const itemRows = items.map((r) => {
+    const next = itemPayments(store.state, r.id, today).planned[0];
+    return h('button', { type: 'button', class: 'rsv-row item-row', onClick: () => openItem(r.id) },
+      h('span', { class: `kind-icon k-${r.type}` }, icon(r.type === 'income' ? 'in' : 'out', { size: 18 })),
+      h('span', { class: 'grow hist-main' },
+        h('span', { class: 'hist-title ellipsis' }, rsvTitle(r)),
+        h('span', { class: 'hist-sub ellipsis' }, rsvSub(r)),
+        next ? h('span', { class: 'hist-status' }, t('item.next', { date: fmtDate(next.date, { year: false }), amt: yen(next.amount) })) : null),
+      icon('chevron', { size: 18 }));
+  });
 
   const cancelRows = cancels.map((tx) => h('div', { class: 'rsv-row' },
     h('span', { class: 'kind-icon k-cancel' }, icon('xcircle', { size: 18 })),
@@ -99,6 +113,9 @@ function reserveList() {
   });
 
   return [
+    itemRows.length ? h('div', { class: 'card list top-pending' }, itemRows) : null,
+    // 項目を削除したあとに残った、支払日前の支払い
+    orphans.length ? h('div', { class: 'card list top-pending' }, orphans.map((tx) => plannedRow(tx, () => openPlannedMenu(tx)))) : null,
     cancelRows.length || lendRows.length ? h('div', { class: 'card list top-pending' }, cancelRows, lendRows) : null,
     rsvRows.length ? h('div', { class: 'card list' }, rsvRows) : null,
   ];

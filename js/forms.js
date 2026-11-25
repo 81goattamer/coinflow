@@ -1,9 +1,9 @@
 // 記録（REC）・予約（RSV）の入力フォームと、口座・カテゴリの選択部品
 import { store } from './app-store.js';
-import { nowTime, weekday } from './dates.js';
-import { fmtDay, t, weekName, yen } from './i18n.js';
+import { isDateKey, nowTime, weekday } from './dates.js';
+import { fmtDate, fmtDay, t, weekName, yen } from './i18n.js';
 import { amountInput } from './keypad.js';
-import { activeAccounts } from './ledger.js';
+import { activeAccounts, firstRepeatDate } from './ledger.js';
 import { catIcon } from './store.js';
 import { field, h, icon, seg, setChildren, switchInput, toast } from './ui.js';
 
@@ -105,8 +105,9 @@ function categoryOk(catId, subId) {
   return !c.subs.length || c.subs.some((s) => s.id === subId);
 }
 
-export function dateTimeFields(st, onChange) {
+export function dateTimeFields(st, onChange, { dateOnly = false } = {}) {
   const date = h('input', { class: 'input', type: 'date', value: st.date, required: true, 'aria-label': t('common.date'), onChange: (e) => { if (e.target.value) st.date = e.target.value; else e.target.value = st.date; onChange(); } });
+  if (dateOnly) return date;
   const time = h('input', { class: 'input time', type: 'time', value: st.time ?? '', disabled: !st.withTime, 'aria-label': t('common.time'), onChange: (e) => { st.time = e.target.value || null; } });
   return h('div', { class: 'datetime' },
     date,
@@ -158,11 +159,34 @@ export function draftFromTx(tx) {
 // ---- 予約のフォーム ----
 
 export function newRsvDraft(type = 'expense') {
-  return { id: null, type, date: store.today(), accountId: null, catId: null, subId: null, amount: null, repeat: { kind: 'none', n: 7 }, company: '', payDay: 25, shift: 'prev' };
+  return { id: null, type, date: store.today(), name: '', accountId: null, catId: null, subId: null, amount: null, repeat: repeatDraft({ kind: 'none' }), company: '', payDay: 25, shift: 'prev' };
 }
 
 export function draftFromRsv(r) {
-  return { ...r, repeat: { n: 7, ...r.repeat } };
+  return { ...r, name: r.name ?? '', date: r.date ?? store.today(), repeat: repeatDraft(r.repeat) };
+}
+
+// 繰り返しの入力用。選び直しても困らないよう、使っていない項目にも初めの値を入れておく
+function repeatDraft(repeat) {
+  const today = store.today();
+  return { n: 7, w: weekday(today), day: Number(today.slice(8)), ...repeat };
+}
+
+// 保存する形（使う項目だけ）
+function repeatOf(st) {
+  const { kind, n, w, day } = st.repeat;
+  if (kind === 'days') return { kind, n: Math.max(1, Math.round(n)) };
+  if (kind === 'weekly') return { kind, w };
+  if (kind === 'monthly') return { kind, day };
+  return { kind };
+}
+
+// 毎週・毎月の次の日。繰り返しを変えていない編集では、今の回の日付のまま
+function repeatDate(st) {
+  const rep = repeatOf(st);
+  const old = st.id ? store.get('reservations', st.id) : null;
+  if (old?.repeat && isDateKey(old.date) && JSON.stringify(repeatOf(old)) === JSON.stringify(rep)) return old.date;
+  return firstRepeatDate(rep, store.today());
 }
 
 export function repeatLabel(r) {
@@ -170,7 +194,8 @@ export function repeatLabel(r) {
   if (r.type === 'salary') return r.payDay === 'end' ? t('day.everyEnd') : t('day.everyN', { n: r.payDay });
   if (rep.kind === 'days') return t('repeat.everyDays', { n: rep.n });
   if (rep.kind === 'weekly') return t('repeat.everyWeek', { w: weekName(rep.w) });
-  if (rep.kind === 'monthly') return t('repeat.everyMonth', { d: rep.day });
+  if (rep.kind === 'monthly') return rep.day === 'end' ? t('day.everyEnd') : t('repeat.everyMonth', { d: rep.day });
+  if (rep.kind === 'irregular') return t('repeat.irregular');
   return '';
 }
 
@@ -187,11 +212,8 @@ export function rsvForm(st, { onDone, editing = false, onCategory = null }) {
   const check = () => { if (saveBtn) saveBtn.disabled = !valid(); };
   const save = () => {
     if (!valid()) return;
-    const rep = { kind: st.repeat.kind };
-    if (rep.kind === 'days') rep.n = Math.max(1, Math.round(st.repeat.n));
-    if (rep.kind === 'weekly') rep.w = weekday(st.date);
-    if (rep.kind === 'monthly') rep.day = Number(st.date.slice(8));
-    const r = store.saveReservation({ ...st, repeat: rep });
+    const fixed = st.type !== 'salary' && ['weekly', 'monthly'].includes(st.repeat.kind);
+    const r = store.saveReservation({ ...st, repeat: repeatOf(st), date: fixed ? repeatDate(st) : st.date });
     onDone?.(r);
   };
   const draw = () => {
@@ -212,10 +234,16 @@ export function rsvForm(st, { onDone, editing = false, onCategory = null }) {
       parts.push(field(t('field.holiday'), shiftSeg(st.shift, (v) => { st.shift = v; draw(); })));
     } else {
       const isExp = st.type === 'expense';
-      parts.push(h('div', { class: `amount-row ${st.type}` },
-        h('span', { class: 'amount-kind' }, icon(KIND_ICON[st.type], { size: 22 })),
-        amountInput({ value: st.amount, big: true, label: t('field.amountOptional'), placeholder: t('field.amountOptional'), onChange: (v) => { st.amount = v; } })));
-      parts.push(field(t('common.date'), h('input', { class: 'input', type: 'date', value: st.date, 'aria-label': t('common.date'), onChange: (e) => { if (e.target.value) st.date = e.target.value; else e.target.value = st.date; draw(); } })));
+      const kind = st.repeat.kind;
+      // 不定期では、金額と日付は支払うたびに入れるので出さない
+      parts.push(field(t('field.repeat'), repeatControl(st, draw, check)));
+      if (kind !== 'irregular') {
+        parts.push(h('div', { class: `amount-row ${st.type}` },
+          h('span', { class: 'amount-kind' }, icon(KIND_ICON[st.type], { size: 22 })),
+          amountInput({ value: st.amount, big: true, label: t('field.amountOptional'), placeholder: t('field.amountOptional'), onChange: (v) => { st.amount = v; } })));
+      }
+      parts.push(field(t('field.txName'), h('input', { class: 'input rsv-name', value: st.name, maxlength: 40, 'aria-label': t('field.txName'), onInput: (e) => { st.name = e.target.value; } })));
+      if (kind === 'none' || kind === 'days') parts.push(field(t(kind === 'days' ? 'repeat.start' : 'common.date'), h('input', { class: 'input', type: 'date', value: st.date, 'aria-label': t('common.date'), onChange: (e) => { if (e.target.value) st.date = e.target.value; else e.target.value = st.date; draw(); } })));
       parts.push(field(isExp ? t('field.payFrom') : t('field.payTo'), accountPicker({ types: isExp ? ['cash', 'card', 'saving'] : ['cash', 'saving'], value: st.accountId, onChange: (id) => { st.accountId = id; draw(); } })));
       parts.push(field(t('field.category'), onCategory
         ? h('button', { type: 'button', class: 'cat-line boxed', onClick: onCategory },
@@ -223,7 +251,6 @@ export function rsvForm(st, { onDone, editing = false, onCategory = null }) {
           h('span', { class: 'grow cat-text' }, h('span', { class: 'cat-name ellipsis' }, catLabel(st.catId, st.subId))),
           icon('chevron', { size: 20 }))
         : categoryPicker({ kind: st.type, catId: st.catId, subId: st.subId, onChange: (c, s) => { st.catId = c; st.subId = s; check(); } })));
-      parts.push(field(t('field.repeat'), repeatControl(st, draw)));
     }
     saveBtn = h('button', { type: 'button', class: 'btn primary block', onClick: save }, editing ? t('common.save') : t('rec.reserve'));
     parts.push(saveBtn);
@@ -234,21 +261,38 @@ export function rsvForm(st, { onDone, editing = false, onCategory = null }) {
   return root;
 }
 
-function repeatControl(st, redraw) {
+// なし／定期（n日毎・毎週・毎月）／不定期
+function repeatControl(st, redraw, check) {
   const r = st.repeat;
-  const rows = [seg([['none', t('repeat.none')], ['days', t('repeat.days')], ['weekly', t('repeat.weekly')], ['monthly', t('repeat.monthly')]], r.kind, (v) => { r.kind = v; redraw(); }, 'wide small')];
-  if (r.kind === 'days') {
-    rows.push(h('div', { class: 'inline-field' },
-      h('input', { class: 'input num', type: 'number', inputmode: 'numeric', min: 1, value: String(r.n), 'aria-label': t('repeat.days'), onInput: (e) => { r.n = Math.floor(Number(e.target.value)); } }),
-      h('span', { class: 'muted' }, t('repeat.daysUnit'))));
+  const regular = r.kind !== 'none' && r.kind !== 'irregular';
+  const pick = (kind) => { r.kind = kind; redraw(); };
+  const rows = [seg([['none', t('repeat.none')], ['regular', t('repeat.regular')], ['irregular', t('repeat.irregular')]], regular ? 'regular' : r.kind, (v) => {
+    if (v === 'regular') {
+      if (!regular) pick('monthly');
+    } else if (v !== r.kind) pick(v);
+  }, 'wide')];
+  if (regular) {
+    rows.push(seg([['days', t('repeat.days')], ['weekly', t('repeat.weekly')], ['monthly', t('repeat.monthly')]], r.kind, pick, 'wide small'));
+    if (r.kind === 'days') {
+      rows.push(h('div', { class: 'inline-field' },
+        h('input', { class: 'input num', type: 'number', inputmode: 'numeric', min: 1, value: String(r.n), 'aria-label': t('repeat.days'), onInput: (e) => { r.n = Math.floor(Number(e.target.value)); check(); } }),
+        h('span', { class: 'muted' }, t('repeat.daysUnit'))));
+    } else {
+      const next = h('span', {});
+      const showNext = () => { next.textContent = t('repeat.next', { date: fmtDate(repeatDate(st)) }); };
+      rows.push(r.kind === 'weekly'
+        ? seg(t('week').split(',').map((name, w) => [w, name]), r.w, (w) => { r.w = w; redraw(); }, 'wide small week-seg')
+        : daySelect(r.day, (d) => { r.day = d; showNext(); }, 31));
+      showNext();
+      rows.push(h('p', { class: 'muted small hint-line' }, icon('calendar', { size: 16 }), next));
+    }
   }
-  if (r.kind === 'weekly') rows.push(h('p', { class: 'muted small hint-line' }, icon('repeat', { size: 16 }), t('repeat.everyWeek', { w: weekName(weekday(st.date)) })));
-  if (r.kind === 'monthly') rows.push(h('p', { class: 'muted small hint-line' }, icon('repeat', { size: 16 }), t('repeat.everyMonth', { d: Number(st.date.slice(8)) })));
+  if (r.kind === 'irregular') rows.push(h('p', { class: 'muted small hint-line' }, icon('history', { size: 16 }), t('repeat.irregularHint')));
   return h('div', { class: 'repeat' }, rows);
 }
 
-export function daySelect(value, onChange) {
-  const opts = [...Array.from({ length: 28 }, (_, i) => i + 1), 'end'];
+export function daySelect(value, onChange, last = 28) {
+  const opts = [...Array.from({ length: last }, (_, i) => i + 1), 'end'];
   return h('select', { class: 'input', onChange: (e) => onChange(e.target.value === 'end' ? 'end' : Number(e.target.value)) },
     opts.map((d) => h('option', { value: String(d), selected: String(d) === String(value) }, fmtDay(d))));
 }

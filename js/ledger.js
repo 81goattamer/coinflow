@@ -16,6 +16,35 @@ export const refundOf = (tx) => (tx.cancel?.state === 'done' ? tx.cancel.refund 
 export const POINT_CAT = '__points';
 export const pointsOf = (tx) => (tx.type === 'expense' ? tx.points ?? 0 : 0);
 
+// ---- 不定期の予約（例: 電気代）から登録した支払い ----
+
+export const isIrregular = (rsv) => rsv?.repeat?.kind === 'irregular';
+
+// 不定期の支払いのうち、まだ支払日が来ていないもの。履歴にも計算にも入れない
+export const isPlanned = (tx, today) => !!tx.itemId && tx.date > today;
+
+// 支払日が来ていない不定期の支払いを除いた state。残高・分析・履歴の計算にはこれを渡す
+export function liveState(state, today) {
+  return { ...state, txs: state.txs.filter((tx) => !isPlanned(tx, today)) };
+}
+
+const byDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+// 1つの項目の支払い。planned は支払日の近い順、paid は新しい順
+export function itemPayments(state, itemId, today) {
+  const list = state.txs.filter((tx) => tx.itemId === itemId);
+  return {
+    planned: list.filter((tx) => isPlanned(tx, today)).sort(byDate),
+    paid: list.filter((tx) => !isPlanned(tx, today)).sort((a, b) => byDate(b, a)),
+  };
+}
+
+// 項目を削除したあとに残った、支払日前の支払い
+export function orphanPlanned(state, today) {
+  const items = new Set(state.reservations.filter(isIrregular).map((r) => r.id));
+  return state.txs.filter((tx) => isPlanned(tx, today) && !items.has(tx.itemId)).sort(byDate);
+}
+
 // ---- 残高（4章） ----
 
 export function balances(state) {
@@ -274,7 +303,7 @@ export function pendingLends(state) {
 
 // ベル（BELL-02）
 export function bellItems(state, today) {
-  const reservations = state.reservations.filter((r) => r.date <= today).sort((a, b) => (a.date < b.date ? -1 : 1));
+  const reservations = state.reservations.filter((r) => r.date && r.date <= today).sort((a, b) => (a.date < b.date ? -1 : 1));
   const payments = dueCardPayments(state, today);
   const cancels = pendingCancels(state);
   return { reservations, payments, cancels, count: reservations.length + payments.length };

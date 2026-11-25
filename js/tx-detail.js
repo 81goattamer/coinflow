@@ -11,7 +11,7 @@ import { h, icon, openSheet, setChildren, switchInput, toast } from './ui.js';
 
 // 口座の一覧（残高つき）。シートと、振替の口座選択画面で使う
 export function accountList({ types, value, extra = [], exclude = null, onPick }) {
-  const bal = balances(store.state);
+  const bal = balances(store.live);
   const list = activeAccounts(store.state, types).filter((a) => a.id !== exclude);
   return h('div', { class: 'card list pick-list' },
     list.map((a) => h('button', {
@@ -36,8 +36,9 @@ export function openAccountPicker({ title, onPick, ...rest }) {
   return sheet;
 }
 
+// simple は、金額・日付・口座だけ（不定期の支払い）
 // st は下書き（forms.js の newTxDraft / draftFromTx）
-export function txDetail(st, { title, onBack, onDone, onCategory, editing = false }) {
+export function txDetail(st, { title, onBack, onDone, onCategory, editing = false, simple = false }) {
   const root = h('div', { class: 'tx-detail' });
   const amountText = h('span', { class: 'detail-amount-text' });
   const main = amountTarget({ value: st.amount, text: amountText, onChange: (v) => { st.amount = v; updateMax?.(); } });
@@ -66,7 +67,7 @@ export function txDetail(st, { title, onBack, onDone, onCategory, editing = fals
     types: accTypes,
     value: st.accountId,
     exclude: isTr ? st.toAccountId : null,
-    extra: isExp ? [{ id: BORROW, label: t('kind.borrow'), icon: 'handin' }] : [],
+    extra: isExp && !simple ? [{ id: BORROW, label: t('kind.borrow'), icon: 'handin' }] : [],
     title: isInc ? t('key.pickTo') : t('key.pickFrom'),
     onPick: (id) => { st.accountId = id; draw(); },
   });
@@ -143,6 +144,7 @@ export function txDetail(st, { title, onBack, onDone, onCategory, editing = fals
       borrowName,
       lends: st.lends,
       reservationId: st.reservationId,
+      itemId: st.itemId,
       cardId: st.cardId,
       cycle: st.cycle,
     });
@@ -164,7 +166,14 @@ export function txDetail(st, { title, onBack, onDone, onCategory, editing = fals
     parts.push(h('div', { class: `drow amount-drow ${st.type}`, onClick: () => setTarget(main) },
       h('span', { class: 'currency' }, h('span', { class: 'yen' }, '¥'), h('span', { class: 'jpy' }, 'JPY')),
       amountText));
-    parts.push(row(icon('calendar', { size: 22 }), dateTimeFields(st, () => {})));
+    parts.push(row(icon('calendar', { size: 22 }), simple
+      ? h('label', { class: 'date-only' }, h('span', { class: 'muted' }, t(`item.date.${st.type}`)), dateTimeFields(st, () => {}, { dateOnly: true }))
+      : dateTimeFields(st, () => {})));
+    if (simple) {
+      parts.push(accountRow(st.accountId, t(isInc ? 'key.pickTo' : 'key.pickFrom'), pickFrom));
+      setChildren(body, parts);
+      return;
+    }
     if (!isTr && st.type !== 'cardpay') {
       const c = store.get('categories', st.catId);
       parts.push(row(h('span', { class: 'emoji-icon' }, c ? catIcon(c) : '🏷️'), c ? catLabel(st.catId, st.subId) : h('span', { class: 'muted' }, t('cat.choose')), onCategory));

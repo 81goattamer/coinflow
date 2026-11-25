@@ -1,15 +1,16 @@
 // シート: 口座の追加・設定・明細、記録の編集、予約の登録、カードの支払い、キャンセル確定、貸与・借入、ベル
 import { store } from './app-store.js';
+import { catIcon } from './store.js';
 import { fmtDate, t, yen } from './i18n.js';
 import { amountInput, closeKeypad } from './keypad.js';
 import {
-  TYPE_ICON, accIcon, accName, accountPicker, catLabel, daySelect, draftFromRsv, draftFromTx, newTxDraft, repeatLabel, rsvForm, shiftSeg, txLabel,
+  KIND_ICON, TYPE_ICON, accIcon, accName, accountPicker, catLabel, daySelect, draftFromRsv, draftFromTx, newTxDraft, repeatLabel, rsvForm, shiftSeg, txLabel,
 } from './forms.js';
 import { openCategoryChooser, txDetail } from './tx-detail.js';
-import { balances, bellItems, cardStatus, historyRows, openParties, rowTouches, unpaidCycles, unpaidOf } from './ledger.js';
+import { balances, bellItems, cardStatus, historyRows, isIrregular, itemPayments, openParties, rowTouches, unpaidCycles, unpaidOf } from './ledger.js';
 import { rowView, statusLines } from './rows.js';
 import {
-  actionMenu, confirmDialog, empty, field, h, icon, iconButton, openSheet, seg, setChildren, switchInput, toast,
+  actionMenu, addIcon, confirmDialog, empty, field, h, icon, iconButton, openSheet, seg, setChildren, switchInput, toast,
 } from './ui.js';
 
 const EMOJIS = ['👛', '💴', '💳', '🏦', '🐷', '💰', '🪙', '💵', '🏧', '📱', '🛒', '🍙', '☕', '🚃', '🎮', '🎁', '🏠', '✈️', '⭐', '🍀', '🐱', '🐶', '🌸', '🔵', '🟢', '🟠', '🔴', '🟣'];
@@ -39,7 +40,7 @@ function resizeImage(file, size = 160) {
 
 export function openAccountForm(account = null) {
   const editing = !!account;
-  const bal = balances(store.state);
+  const bal = balances(store.live);
   const current = account ? (account.type === 'card' ? unpaidOf(bal, account.id) : bal.get(account.id)) : null;
   const st = {
     type: account?.type ?? 'cash',
@@ -152,10 +153,10 @@ export function openAccountDetail(id) {
       const a = store.get('accounts', id);
       if (!a) return empty(t('acc.detailEmpty'));
       api.setTitle(a.name);
-      const bal = balances(store.state);
+      const bal = balances(store.live);
       const head = [];
       if (a.type === 'card') {
-        const s = cardStatus(store.state, a, store.today(), bal);
+        const s = cardStatus(store.live, a, store.today(), bal);
         head.push(h('div', { class: 'detail-head' },
           accIcon(a, 44),
           h('div', { class: 'grow' },
@@ -171,7 +172,7 @@ export function openAccountDetail(id) {
             h('div', { class: 'detail-amount' }, yen(bal.get(a.id))))));
       }
       if (a.memo) head.push(h('p', { class: 'muted small memo' }, a.memo));
-      const rows = historyRows(store.state).filter((r) => rowTouches(r, id));
+      const rows = historyRows(store.live).filter((r) => rowTouches(r, id));
       return h('div', {}, head, rows.length
         ? h('div', { class: 'card list' }, rows.map((r) => rowView(r, { accountId: id, onClick: () => openRowMenu(r) })))
         : empty(t('acc.detailEmpty'), TYPE_ICON[a.type]));
@@ -221,12 +222,13 @@ export function openTxEdit(id) {
 }
 
 // 記録の詳細画面をシートで開く（編集・予約の登録）
-function openDetailSheet(st, { title, editing = false, onDone }) {
+function openDetailSheet(st, { title, editing = false, simple = false, onDone }) {
   let sheet;
   const mount = () => {
     const el = txDetail(st, {
       title,
       editing,
+      simple,
       onBack: () => sheet.close(),
       onCategory: () => openCategoryChooser(st, mount),
       onDone: (tx) => { sheet.close(); onDone?.(tx); },
@@ -244,7 +246,7 @@ export function openRegisterSheet(rsvId) {
   const r = store.get('reservations', rsvId);
   if (!r) return;
   const st = newTxDraft(r.type === 'salary' ? 'income' : r.type);
-  Object.assign(st, { amount: r.amount, accountId: r.accountId, catId: r.catId, subId: r.subId, date: r.date, withTime: false, time: null, reservationId: r.id });
+  Object.assign(st, { name: r.name ?? '', amount: r.amount, accountId: r.accountId, catId: r.catId, subId: r.subId, date: r.date, withTime: false, time: null, reservationId: r.id });
   // 給与は、お店の欄に会社名を入れる
   if (r.type === 'salary') Object.assign(st, { catId: store.salaryCategory().id, subId: null, shop: r.company });
   openDetailSheet(st, {
@@ -281,11 +283,115 @@ export function openRsvEdit(id) {
 
 export function rsvTitle(r) {
   if (r.type === 'salary') return `${t('kind.salary')} · ${r.company}`;
-  return catLabel(r.catId, r.subId);
+  return r.name || catLabel(r.catId, r.subId);
 }
 
 export function rsvSub(r) {
-  return [accName(r.accountId), repeatLabel(r)].filter(Boolean).join(' · ');
+  return [r.name ? catLabel(r.catId, r.subId) : '', accName(r.accountId), repeatLabel(r)].filter(Boolean).join(' · ');
+}
+
+// ---- 不定期の項目のページ ----
+
+const itemText = (what, type) => t(`item.${what}.${type}`);
+
+// 支払い1件の行（見出しは日付）。title を渡すと見出しに使い、日付は下に書く
+function paymentRow(tx, { title = '', onClick, planned = false }) {
+  const acc = tx.accountId ? accName(tx.accountId) : t('kind.borrow');
+  const date = fmtDate(tx.date);
+  return h('button', { type: 'button', class: `hist-row ${tx.cancel?.state === 'done' ? 'cancelled' : ''}`, onClick },
+    h('span', { class: `kind-icon k-${planned ? 'planned' : tx.type}` }, icon(planned ? 'calendar' : KIND_ICON[tx.type], { size: 18 })),
+    h('span', { class: 'grow hist-main' },
+      h('span', { class: 'hist-title ellipsis' }, title || date),
+      h('span', { class: 'hist-sub ellipsis' }, title ? `${date} · ${acc}` : acc),
+      planned ? null : statusLines(tx).map((l) => h('span', { class: `hist-status ${l.done ? 'done' : ''} ${l.warn ? 'warn' : ''}` }, l.text))),
+    h('span', { class: `hist-amount ${tx.type === 'income' ? 'plus' : 'minus'}` }, yen(tx.type === 'income' ? tx.amount : -tx.amount, { sign: true })));
+}
+
+export function plannedRow(tx, onClick) {
+  return paymentRow(tx, { title: txLabel(tx), planned: true, onClick });
+}
+
+export function openItem(id) {
+  const item = () => {
+    const r = store.get('reservations', id);
+    return isIrregular(r) ? r : null;
+  };
+  const sheet = openSheet({
+    title: '',
+    full: true,
+    headerRight: () => iconButton('more', t('common.more'), () => {
+      const r = item();
+      if (!r) return;
+      actionMenu(rsvTitle(r), [
+        { label: t('common.edit'), icon: 'edit', onClick: () => openRsvEdit(id) },
+        { label: t('common.delete'), icon: 'trash', danger: true, onClick: async () => {
+          if (await confirmDialog({ message: t('item.deleteAsk'), okLabel: t('common.delete'), danger: true })) {
+            sheet.close();
+            store.deleteReservation(id);
+          }
+        } },
+      ]);
+    }),
+    render: (api) => {
+      const r = item();
+      // 「不定期」でなくしたり、ほかで消えたりしたら閉じる
+      if (!r) {
+        api.close();
+        return null;
+      }
+      api.setTitle(rsvTitle(r));
+      const { planned, paid } = itemPayments(store.state, id, store.today());
+      const group = (title, rows) => (rows.length ? h('section', { class: 'group' }, h('h3', { class: 'group-label' }, title), h('div', { class: 'card list' }, rows)) : null);
+      const addLabel = itemText('add', r.type);
+      return h('div', { class: 'item-page' },
+        h('div', { class: 'detail-head' },
+          h('span', { class: 'emoji-icon' }, catIcon(store.get('categories', r.catId))),
+          h('div', { class: 'grow' },
+            h('div', { class: 'ellipsis' }, catLabel(r.catId, r.subId)),
+            h('div', { class: 'muted small ellipsis' }, `${t('repeat.irregular')} · ${accName(r.accountId)}`))),
+        group(itemText('planned', r.type), planned.map((tx) => paymentRow(tx, { planned: true, onClick: () => openPlannedMenu(tx) }))),
+        group(t('hist.history'), paid.map((tx) => paymentRow(tx, { onClick: () => openTxMenu(tx) }))),
+        !planned.length && !paid.length ? empty(t('item.empty'), 'calendar') : null,
+        h('div', { class: 'fab-space' }),
+        h('button', { type: 'button', class: 'fab sheet-fab', 'aria-label': addLabel, title: addLabel, onClick: () => openPaymentForm(id) }, addIcon('calendar')));
+    },
+  });
+  return sheet;
+}
+
+// 日付が先なら、いつ反映されるかを知らせる
+function paymentToast(tx, doneText) {
+  toast(tx.date > store.today() ? t('item.willApply', { date: fmtDate(tx.date, { year: false, week: false }) }) : doneText);
+}
+
+function openPaymentForm(id) {
+  const r = store.get('reservations', id);
+  if (!r) return;
+  const st = newTxDraft(r.type);
+  const acc = store.get('accounts', r.accountId);
+  Object.assign(st, { name: r.name ?? '', catId: r.catId, subId: r.subId, accountId: acc && !acc.deleted ? acc.id : null, withTime: false, time: null, itemId: r.id });
+  openDetailSheet(st, {
+    title: itemText('add', r.type),
+    simple: true,
+    onDone: (tx) => {
+      store.setItemAccount(r.id, tx.accountId);
+      paymentToast(tx, t('rec.saved'));
+    },
+  });
+}
+
+// 支払日前の支払いを押したとき
+export function openPlannedMenu(tx) {
+  actionMenu(`${fmtDate(tx.date)} · ${yen(tx.amount)}`, [
+    { label: t('common.edit'), icon: 'edit', onClick: () => {
+      const cur = store.get('txs', tx.id);
+      if (!cur) return;
+      openDetailSheet(draftFromTx(cur), { title: itemText('edit', cur.type), editing: true, simple: true, onDone: (x) => paymentToast(x, t('rec.updated')) });
+    } },
+    { label: t('common.delete'), icon: 'trash', danger: true, onClick: async () => {
+      if (await confirmDialog({ message: t('hist.deleteAsk'), okLabel: t('common.delete'), danger: true })) store.deleteTx(tx.id);
+    } },
+  ]);
 }
 
 // ---- カードの支払い（CARD-01〜03） ----
@@ -293,7 +399,7 @@ export function rsvSub(r) {
 export function openPaySheet(cardId, { onDone } = {}) {
   const a = store.get('accounts', cardId);
   if (!a) return null;
-  const s = cardStatus(store.state, a, store.today());
+  const s = cardStatus(store.live, a, store.today());
   if (!s.due) {
     onDone?.();
     return null;
@@ -341,7 +447,7 @@ export function openCancelSheet(txId) {
   const tx = store.get('txs', txId);
   const card = store.get('accounts', tx?.accountId);
   if (!tx || !card) return;
-  const cycles = unpaidCycles(store.state, card, store.today());
+  const cycles = unpaidCycles(store.live, card, store.today());
   const st = { to: 'month', cycle: cycles[0]?.cycle ?? null, accountId: null, partial: false, refund: tx.amount };
   const root = h('div', { class: 'form' });
   let btn;
@@ -426,7 +532,7 @@ export function openBell() {
     title: t('bell.title'),
     full: true,
     render: () => {
-      const b = bellItems(store.state, store.today());
+      const b = bellItems(store.live, store.today());
       if (!b.reservations.length && !b.payments.length && !b.cancels.length) return empty(t('bell.empty'), 'bell');
       const group = (title, rows) => (rows.length ? h('section', { class: 'group' }, h('h3', { class: 'group-label' }, title), h('div', { class: 'card list' }, rows)) : null);
       return h('div', {},

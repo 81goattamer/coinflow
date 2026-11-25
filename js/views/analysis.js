@@ -20,7 +20,7 @@ function svg(tag, attrs = {}, ...kids) {
 
 export function renderAnalysis(root) {
   month ??= monthOf(store.today());
-  const a = analyze(store.state, month);
+  const a = analyze(store.live, month);
   const diff = a.income - a.expense;
 
   setChildren(root,

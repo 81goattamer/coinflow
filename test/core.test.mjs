@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { evaluate, pressKey } from '../js/calc.js';
 import { isHoliday, shiftDate, todayKey, dayInMonth, holidaysOf } from '../js/dates.js';
 import { Store } from '../js/store.js';
-import { analyze, balances, bellItems, cardStatus, cycleOfDate, historyRows, payDateOf, startCycle, totalBalance, unpaidOf } from '../js/ledger.js';
+import { analyze, balances, bellItems, cardStatus, cycleOfDate, historyRows, itemPayments, orphanPlanned, payDateOf, startCycle, totalBalance, unpaidOf } from '../js/ledger.js';
 
 const at = (s) => new Date(s).getTime();
 function setup(start = '2026-11-21T12:00:00') {
@@ -239,4 +239,51 @@ test('account type can switch between cash and saving; card paid from another ac
   const tx = st.payCard(card.id, '2026-12', 300, '2027-01-10', sav.id);
   assert.equal(tx.accountId, sav.id);
   assert.equal(balances(st.state).get(sav.id), 4700);
+});
+
+test('irregular items: payments apply on their date', () => {
+  const { st, clock } = setup();
+  const { cash, save, card } = bank(st);
+  const r = st.saveReservation({ type: 'expense', name: ' 電気代 ', accountId: cash.id, catId: 'c1', date: '2026-11-21', amount: 100, repeat: { kind: 'irregular' } });
+  assert.deepEqual([r.name, r.date, r.amount], ['電気代', null, null]);
+  assert.equal(bellItems(st.live, '2030-01-01').reservations.length, 0);
+  const tx = st.saveTx({ type: 'expense', name: r.name, amount: 5000, date: '2026-12-10', accountId: save.id, catId: 'c1', itemId: r.id });
+  st.setItemAccount(r.id, save.id);
+  assert.equal(st.get('reservations', r.id).accountId, save.id);
+  st.saveTx({ type: 'expense', amount: 700, date: '2026-12-10', accountId: card.id, itemId: r.id });
+  // 支払日の前
+  clock.t = at('2026-12-10T03:59:00');
+  assert.equal(balances(st.live).get(save.id), 50000);
+  assert.equal(unpaidOf(balances(st.live), card.id), 3000);
+  assert.equal(historyRows(st.live).length, 0);
+  assert.equal(analyze(st.live, '2026-12').expense, 0);
+  assert.equal(itemPayments(st.state, r.id, st.today()).planned.length, 2);
+  // 支払日の当日（午前4時）から
+  clock.t = at('2026-12-10T04:00:00');
+  assert.equal(balances(st.live).get(save.id), 45000);
+  assert.equal(unpaidOf(balances(st.live), card.id), 3700);
+  assert.equal(historyRows(st.live).length, 2);
+  assert.equal(analyze(st.live, '2026-12').expense, 5700);
+  assert.equal(itemPayments(st.state, r.id, st.today()).paid.length, 2);
+  // 編集しても項目とのつながりは残る
+  assert.equal(st.saveTx({ ...tx, itemId: undefined, date: '2026-12-20' }).itemId, r.id);
+  assert.equal(historyRows(st.live).length, 1);
+  // 項目を削除しても支払いは残り、支払日に反映される
+  st.deleteReservation(r.id);
+  assert.deepEqual(orphanPlanned(st.state, st.today()).map((x) => x.id), [tx.id]);
+  clock.t = at('2026-12-20T12:00:00');
+  assert.equal(orphanPlanned(st.state, st.today()).length, 0);
+  assert.equal(historyRows(st.live).length, 2);
+  // ふつうの記録は、先の日付でもすぐ反映する
+  st.saveTx({ type: 'expense', amount: 1, date: '2027-01-01', accountId: cash.id });
+  assert.equal(historyRows(st.live).length, 3);
+});
+
+test('monthly on the last day', () => {
+  const { st } = setup();
+  const { cash } = bank(st);
+  const r = st.saveReservation({ type: 'expense', accountId: cash.id, repeat: { kind: 'monthly', day: 'end' } });
+  assert.equal(r.date, '2026-11-30');
+  st.advanceReservation(r.id);
+  assert.equal(st.get('reservations', r.id).date, '2026-12-31');
 });
